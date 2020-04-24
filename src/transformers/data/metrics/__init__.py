@@ -16,7 +16,7 @@
 
 try:
     from scipy.stats import pearsonr, spearmanr
-    from sklearn.metrics import matthews_corrcoef, f1_score
+    from sklearn.metrics import matthews_corrcoef, f1_score, precision_score, recall_score 
 
     _has_sklearn = True
 except (AttributeError, ImportError):
@@ -34,10 +34,15 @@ if _has_sklearn:
 
     def acc_and_f1(preds, labels):
         acc = simple_accuracy(preds, labels)
+
         f1 = f1_score(y_true=labels, y_pred=preds)
+        precision = precision_score(y_true=labels, y_pred=preds)
+        recall = recall_score(y_true=labels, y_pred=preds)
         return {
             "acc": acc,
             "f1": f1,
+            "precision": precision,
+            "recall": recall,
             "acc_and_f1": (acc + f1) / 2,
         }
 
@@ -58,6 +63,8 @@ if _has_sklearn:
             return {"acc": simple_accuracy(preds, labels)}
         elif task_name == "mrpc":
             return acc_and_f1(preds, labels)
+        elif task_name =='persona':
+            return acc_and_f1(preds, labels) 
         elif task_name == "sts-b":
             return pearson_and_spearman(preds, labels)
         elif task_name == "qqp":
