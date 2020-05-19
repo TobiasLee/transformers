@@ -20,7 +20,7 @@ from transformers import is_torch_available
 
 from .test_configuration_common import ConfigTester
 from .test_modeling_common import ModelTesterMixin, ids_tensor
-from .utils import CACHE_DIR, require_torch, slow, torch_device
+from .utils import require_torch, slow, torch_device
 
 
 if is_torch_available():
@@ -304,6 +304,16 @@ class T5ModelTest(ModelTesterMixin, unittest.TestCase):
             output_with_past_cache = model.generate(input_ids[:1], num_beams=2, max_length=5, do_sample=True)
             self.parent.assertTrue(torch.all(output_with_past_cache == output_without_past_cache))
 
+        def create_and_check_t5_model_fp16_forward(
+            self, config, input_ids, decoder_input_ids, attention_mask, decoder_attention_mask, lm_labels,
+        ):
+            model = T5Model(config=config)
+            model.to(torch_device)
+            model.half()
+            model.eval()
+            output = model(input_ids, decoder_input_ids=input_ids, attention_mask=attention_mask)[0]
+            self.parent.assertFalse(torch.isnan(output).any().item())
+
         def prepare_config_and_inputs_for_common(self):
             config_and_inputs = self.prepare_config_and_inputs()
             (
@@ -355,10 +365,15 @@ class T5ModelTest(ModelTesterMixin, unittest.TestCase):
         config_and_inputs = self.model_tester.prepare_config_and_inputs()
         self.model_tester.create_t5_and_check_t5_generate_with_past_key_value_states(*config_and_inputs)
 
+    @unittest.skipIf(torch_device == "cpu", "Cant do half precision")
+    def test_t5_model_fp16_forward(self):
+        config_and_inputs = self.model_tester.prepare_config_and_inputs()
+        self.model_tester.create_and_check_t5_model_fp16_forward(*config_and_inputs)
+
     @slow
     def test_model_from_pretrained(self):
         for model_name in list(T5_PRETRAINED_MODEL_ARCHIVE_MAP.keys())[:1]:
-            model = T5Model.from_pretrained(model_name, cache_dir=CACHE_DIR)
+            model = T5Model.from_pretrained(model_name)
             self.assertIsNotNone(model)
 
 
