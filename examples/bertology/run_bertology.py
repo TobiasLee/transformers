@@ -101,7 +101,8 @@ def compute_heads_importance(
                 attn_entropy[layer] += masked_entropy.sum(-1).sum(0).detach()
 
         if compute_importance:
-            head_importance += head_mask.grad.abs().detach()
+            if head_mask.grad is not None:
+                head_importance += head_mask.grad.abs().detach()
 
         # Also store our logits/labels if we want to compute metrics afterwards
         if preds is None:
