@@ -187,7 +187,7 @@ def mask_heads(args, model, eval_dataloader):
         preds = np.argmax(preds, axis=1) if args.output_mode == "classification" else np.squeeze(preds)
         current_score = glue_compute_metrics(args.task_name, preds, labels)[args.metric_name]
         logger.info(
-            "Masking: current score: %f, remaning heads %d (%.1f percents)",
+            "Masking: current score: %f, remaining heads %d (%.1f percents)",
             current_score,
             new_head_mask.sum(),
             new_head_mask.sum() / new_head_mask.numel() * 100,
