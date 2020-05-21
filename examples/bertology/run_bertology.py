@@ -132,11 +132,14 @@ def compute_heads_importance(
         head_importance = (head_importance - head_importance.min()) / (head_importance.max() - head_importance.min())
 
     # Print/save matrices
-    np.save(os.path.join(args.output_dir, "attn_entropy.npy"), attn_entropy.detach().cpu().numpy())
-    np.save(os.path.join(args.output_dir, "head_importance.npy"), head_importance.detach().cpu().numpy())
+    if compute_entropy:
+        np.save(os.path.join(args.output_dir, "attn_entropy.npy"), attn_entropy.detach().cpu().numpy())
+    if compute_importance:
+        np.save(os.path.join(args.output_dir, "head_importance.npy"), head_importance.detach().cpu().numpy())
 
-    # logger.info("Attention entropies")
-    # print_2d_tensor(attn_entropy)
+
+    logger.info("Attention entropies")
+    print_2d_tensor(attn_entropy)
     logger.info("Head importance scores")
     print_2d_tensor(head_importance)
     logger.info("Head ranked by importance scores")
@@ -164,8 +167,7 @@ def mask_heads(args, model, eval_dataloader):
 
     current_score = original_score
     while current_score >= original_score * args.masking_threshold:
-        head_mask = new_head_mask.clone().detach()  # save current head mask
-        logger.info("clone id: %d" % id(head_mask))
+        head_mask = new_head_mask.clone()  # save current head mask
         # heads from least important to most - keep only not-masked heads
         head_importance[head_mask == 0.0] = float("Inf")
         current_heads_to_mask = head_importance.view(-1).sort()[1]
@@ -181,7 +183,8 @@ def mask_heads(args, model, eval_dataloader):
         new_head_mask = new_head_mask.view_as(head_mask)
         new_head_mask = new_head_mask.clone().detach()
         print_2d_tensor(new_head_mask)
-        logger.info("id in mask: %d " % id(new_head_mask))
+
+
         # Compute metric and head importance again
         _, head_importance, preds, labels = compute_heads_importance(
             args, model, eval_dataloader, compute_entropy=False, head_mask=new_head_mask
@@ -217,6 +220,7 @@ def prune_heads(args, model, eval_dataloader, head_mask):
     original_time = datetime.now() - before_time
 
     original_num_params = sum(p.numel() for p in model.parameters())
+
     heads_to_prune = dict(
         (layer, (1 - head_mask[layer].long()).nonzero().squeeze().tolist()) for layer in range(len(head_mask))
     )
