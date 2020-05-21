@@ -26,7 +26,7 @@ from datetime import datetime
 
 import numpy as np
 import torch
-from torch.utils.data import DataLoader, SequentialSampler, RandomSampler, Subset
+from torch.utils.data import DataLoader, RandomSampler, SequentialSampler, Subset
 from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm
 
@@ -100,7 +100,7 @@ def compute_heads_importance(
         )  # Loss and logits are the first, attention the last
         loss.backward()  # Backpropagate to populate the gradients in the head mask
         # logger.info('loss id: %d' % id(loss))
-        # del loss 
+        # del loss
         if compute_entropy:
             for layer, attn in enumerate(all_attentions):
                 masked_entropy = entropy(attn.detach()) * inputs["attention_mask"].float().unsqueeze(1)
@@ -135,8 +135,8 @@ def compute_heads_importance(
     np.save(os.path.join(args.output_dir, "attn_entropy.npy"), attn_entropy.detach().cpu().numpy())
     np.save(os.path.join(args.output_dir, "head_importance.npy"), head_importance.detach().cpu().numpy())
 
-    #logger.info("Attention entropies")
-    #print_2d_tensor(attn_entropy)
+    # logger.info("Attention entropies")
+    # print_2d_tensor(attn_entropy)
     logger.info("Head importance scores")
     print_2d_tensor(head_importance)
     logger.info("Head ranked by importance scores")
@@ -165,7 +165,7 @@ def mask_heads(args, model, eval_dataloader):
     current_score = original_score
     while current_score >= original_score * args.masking_threshold:
         head_mask = new_head_mask.clone().detach()  # save current head mask
-        logger.info('clone id: %d' % id(head_mask))
+        logger.info("clone id: %d" % id(head_mask))
         # heads from least important to most - keep only not-masked heads
         head_importance[head_mask == 0.0] = float("Inf")
         current_heads_to_mask = head_importance.view(-1).sort()[1]
@@ -181,7 +181,7 @@ def mask_heads(args, model, eval_dataloader):
         new_head_mask = new_head_mask.view_as(head_mask)
         new_head_mask = new_head_mask.clone().detach()
         print_2d_tensor(new_head_mask)
-        logger.info('id in mask: %d ' %id(new_head_mask))
+        logger.info("id in mask: %d " % id(new_head_mask))
         # Compute metric and head importance again
         _, head_importance, preds, labels = compute_heads_importance(
             args, model, eval_dataloader, compute_entropy=False, head_mask=new_head_mask
@@ -217,7 +217,9 @@ def prune_heads(args, model, eval_dataloader, head_mask):
     original_time = datetime.now() - before_time
 
     original_num_params = sum(p.numel() for p in model.parameters())
-    heads_to_prune = dict((layer, (1 - head_mask[layer].long()).nonzero().squeeze().tolist()) for layer in range(len(head_mask)))
+    heads_to_prune = dict(
+        (layer, (1 - head_mask[layer].long()).nonzero().squeeze().tolist()) for layer in range(len(head_mask))
+    )
 
     assert sum(len(h) for h in heads_to_prune.values()) == (1 - head_mask.long()).sum().item()
     model.prune_heads(heads_to_prune)
@@ -225,8 +227,13 @@ def prune_heads(args, model, eval_dataloader, head_mask):
 
     before_time = datetime.now()
     _, _, preds, labels = compute_heads_importance(
-        args, model, eval_dataloader, compute_entropy=False, compute_importance=False, head_mask=None, actually_pruned=True
-
+        args,
+        model,
+        eval_dataloader,
+        compute_entropy=False,
+        compute_importance=False,
+        head_mask=None,
+        actually_pruned=True,
     )
     preds = np.argmax(preds, axis=1) if args.output_mode == "classification" else np.squeeze(preds)
     score_pruning = glue_compute_metrics(args.task_name, preds, labels)[args.metric_name]
@@ -423,7 +430,7 @@ def main():
     )
 
     # Compute head entropy and importance score
-   #  compute_heads_importance(args, model, eval_dataloader)
+    #  compute_heads_importance(args, model, eval_dataloader)
 
     # Try head masking (set heads to zero until the score goes under a threshole)
     # and head pruning (remove masked heads and see the effect on the network)
