@@ -26,7 +26,7 @@ from datetime import datetime
 
 import numpy as np
 import torch
-from torch.utils.data import DataLoader, SequentialSampler, Subset
+from torch.utils.data import DataLoader, SequentialSampler, RandomSampler, Subset
 from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm
 
@@ -86,10 +86,10 @@ def compute_heads_importance(
     preds = None
     labels = None
     tot_tokens = 0.0
-
     for step, inputs in enumerate(tqdm(eval_dataloader, desc="Iteration", disable=args.local_rank not in [-1, 0])):
         for k, v in inputs.items():
             inputs[k] = v.to(args.device)
+            # logger.info(k)
 
         # Do a forward pass (not with torch.no_grad() since we need gradients for importance score - see below)
         outputs = model(**inputs, head_mask=head_mask)
@@ -99,7 +99,8 @@ def compute_heads_importance(
             outputs[-1],
         )  # Loss and logits are the first, attention the last
         loss.backward()  # Backpropagate to populate the gradients in the head mask
-
+        # logger.info('loss id: %d' % id(loss))
+        # del loss 
         if compute_entropy:
             for layer, attn in enumerate(all_attentions):
                 masked_entropy = entropy(attn.detach()) * inputs["attention_mask"].float().unsqueeze(1)
@@ -217,9 +218,11 @@ def prune_heads(args, model, eval_dataloader, head_mask):
     original_time = datetime.now() - before_time
 
     original_num_params = sum(p.numel() for p in model.parameters())
+
     heads_to_prune = dict(
         (layer, (1 - head_mask[layer].long()).nonzero().squeeze().tolist()) for layer in range(len(head_mask))
     )
+
 
     assert sum(len(h) for h in heads_to_prune.values()) == (1 - head_mask.long()).sum().item()
     model.prune_heads(heads_to_prune)
@@ -424,13 +427,13 @@ def main():
     eval_dataset = GlueDataset(args, tokenizer=tokenizer, evaluate=True)
     if args.data_subset > 0:
         eval_dataset = Subset(eval_dataset, list(range(min(args.data_subset, len(eval_dataset)))))
-    eval_sampler = SequentialSampler(eval_dataset) if args.local_rank == -1 else DistributedSampler(eval_dataset)
+    eval_sampler = RandomSampler(eval_dataset) if args.local_rank == -1 else DistributedSampler(eval_dataset)
     eval_dataloader = DataLoader(
         eval_dataset, sampler=eval_sampler, batch_size=args.batch_size, collate_fn=DefaultDataCollator().collate_batch
     )
 
     # Compute head entropy and importance score
-    compute_heads_importance(args, model, eval_dataloader)
+   #  compute_heads_importance(args, model, eval_dataloader)
 
     # Try head masking (set heads to zero until the score goes under a threshole)
     # and head pruning (remove masked heads and see the effect on the network)
