@@ -570,7 +570,8 @@ class Trainer:
         model.train()
         for k, v in inputs.items():
             inputs[k] = v.to(self.args.device)
-
+        if head_mask:
+            head_mask = head_mask.to(self.args.device)
         outputs = model(**inputs, head_mask=head_mask)  # add mask as subnetwork
         loss = outputs[0]  # model outputs are always tuple in transformers (see doc)
 
@@ -754,7 +755,8 @@ class Trainer:
 
             for k, v in inputs.items():
                 inputs[k] = v.to(self.args.device)
-
+            if head_mask:
+                head_mask = head_mask.to(self.args.device)
             with torch.no_grad():
                 outputs = model(**inputs, head_mask=head_mask)
                 if has_labels:
