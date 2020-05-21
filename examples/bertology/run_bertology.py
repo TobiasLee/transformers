@@ -131,8 +131,10 @@ def compute_heads_importance(
         head_importance = (head_importance - head_importance.min()) / (head_importance.max() - head_importance.min())
 
     # Print/save matrices
-    np.save(os.path.join(args.output_dir, "attn_entropy.npy"), attn_entropy.detach().cpu().numpy())
-    np.save(os.path.join(args.output_dir, "head_importance.npy"), head_importance.detach().cpu().numpy())
+    if compute_entropy:
+        np.save(os.path.join(args.output_dir, "attn_entropy.npy"), attn_entropy.detach().cpu().numpy())
+    if compute_importance:
+        np.save(os.path.join(args.output_dir, "head_importance.npy"), head_importance.detach().cpu().numpy())
 
     logger.info("Attention entropies")
     print_2d_tensor(attn_entropy)

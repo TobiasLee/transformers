@@ -303,7 +303,7 @@ class Trainer:
         else:
             return len(dataloader.dataset)
 
-    def train(self, model_path: Optional[str] = None):
+    def train(self, model_path: Optional[str] = None, head_mask=None):
         """
         Main training entry point.
 
@@ -412,7 +412,7 @@ class Trainer:
                     steps_trained_in_current_epoch -= 1
                     continue
 
-                tr_loss += self._training_step(model, inputs, optimizer)
+                tr_loss += self._training_step(model, inputs, optimizer, head_mask)
 
                 if (step + 1) % self.args.gradient_accumulation_steps == 0 or (
                     # last step in epoch but step is always smaller than gradient_accumulation_steps
@@ -497,13 +497,13 @@ class Trainer:
             print(output)
 
     def _training_step(
-        self, model: nn.Module, inputs: Dict[str, torch.Tensor], optimizer: torch.optim.Optimizer
+        self, model: nn.Module, inputs: Dict[str, torch.Tensor], optimizer: torch.optim.Optimizer, head_mask=None
     ) -> float:
         model.train()
         for k, v in inputs.items():
             inputs[k] = v.to(self.args.device)
 
-        outputs = model(**inputs)
+        outputs = model(**inputs, head_mask=head_mask)  # add mask as subnetwork
         loss = outputs[0]  # model outputs are always tuple in transformers (see doc)
 
         if self.args.n_gpu > 1:
@@ -611,6 +611,7 @@ class Trainer:
 
     def evaluate(
         self, eval_dataset: Optional[Dataset] = None, prediction_loss_only: Optional[bool] = None,
+            head_mask=None
     ) -> Dict[str, float]:
         """
         Run evaluation and return metrics.
@@ -649,7 +650,7 @@ class Trainer:
         return self._prediction_loop(test_dataloader, description="Prediction")
 
     def _prediction_loop(
-        self, dataloader: DataLoader, description: str, prediction_loss_only: Optional[bool] = None
+        self, dataloader: DataLoader, description: str, prediction_loss_only: Optional[bool] = None, head_mask=None
     ) -> PredictionOutput:
         """
         Prediction/evaluation loop, shared by `evaluate()` and `predict()`.
@@ -685,7 +686,7 @@ class Trainer:
                 inputs[k] = v.to(self.args.device)
 
             with torch.no_grad():
-                outputs = model(**inputs)
+                outputs = model(**inputs, head_mask=head_mask)
                 if has_labels:
                     step_eval_loss, logits = outputs[:2]
                     eval_losses += [step_eval_loss.mean().item()]
