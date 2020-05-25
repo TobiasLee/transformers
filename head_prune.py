@@ -56,7 +56,7 @@ class RNNHeadPredictor(nn.Module):
 
     def forward(self, heads_importance):
         # heads_importance: layer_num, 1, head_num ( seq_len, bsz, input_size)
-        heads_importance = heads_importance.unsqeeze(1)
+        heads_importance = heads_importance.unsqueeze(1)
         output, hiddens = self.rnn(heads_importance)
         head_score = self.act(self.linear(output.squeeze()))  # seq_len, 1, head_num
         return head_score
@@ -154,8 +154,8 @@ def compute_heads_importance(
     if compute_importance:
         np.save(os.path.join(args.output_dir, "head_importance.npy"), head_importance.detach().cpu().numpy())
 
-    logger.info("Attention entropies")
-    print_2d_tensor(attn_entropy)
+    #logger.info("Attention entropies")
+    #print_2d_tensor(attn_entropy)
     logger.info("Head importance scores")
     print_2d_tensor(head_importance)
     logger.info("Head ranked by importance scores")
@@ -169,11 +169,11 @@ def compute_heads_importance(
     return attn_entropy, head_importance, preds, labels
 
 
-def search_optimal_heads(args, model, predictor, optimizer, sparse_loss, eval_dataloader):
-    _, head_importance, preds, labels = compute_heads_importance(args, model, eval_dataloader, compute_entropy=False)
+def search_optimal_heads(args, model, predictor, optimizer, sparse_loss, eval_dataloader, head_score):
+    _, head_importance, preds, labels = compute_heads_importance(args, model, eval_dataloader, compute_entropy=False, head_mask=head_score)
     preds = np.argmax(preds, axis=1) if args.output_mode == "classification" else np.squeeze(preds)
     original_score = glue_compute_metrics(args.task_name, preds, labels)[args.metric_name]
-    logger.info("Pruning: original score: %f, threshold: %f", original_score, original_score * args.masking_threshold)
+    logger.info("Pruning: current  score: %f, threshold: %f", original_score, original_score * args.masking_threshold)
     head_score = predictor(head_importance)
 
     for step, inputs in enumerate(tqdm(eval_dataloader, desc="Iteration", disable=args.local_rank not in [-1, 0])):
@@ -188,13 +188,16 @@ def search_optimal_heads(args, model, predictor, optimizer, sparse_loss, eval_da
             outputs[1],
             outputs[-1],
         )  # Loss and logits are the first, attention the last
-        loss = loss + sparse_loss(head_score)
-        loss.backward()  # Backpropagate to populate the gradients in the head mask
+        s_loss = sparse_loss(head_score)
+        total = loss  #+  s_loss
+        total.backward()  # Backpropagate to populate the gradients in the head mask
+        #logger.info('val loss: %f  sparse_loss : %f' %( loss.item(), s_loss.item() ) )
         optimizer.step()  # update predictor score
         head_score = predictor(head_importance)  # update head score
-        logger.info('current head score')
-        print_2d_tensor(head_score)
-
+    logger.info('current total loss: %f' % total.item())
+    logger.info('current head score')
+    print_2d_tensor(head_score)
+    return head_score 
 
 def main():
     parser = argparse.ArgumentParser()
@@ -266,9 +269,7 @@ def main():
         help="Don't normalize all importance scores between 0 and 1",
     )
 
-    parser.add_argument(
-        "--try_masking", action="store_true", help="Whether to try to mask head until a threshold of accuracy."
-    )
+
     parser.add_argument(
         "--masking_threshold",
         default=0.9,
@@ -377,10 +378,16 @@ def main():
         eval_dataset, sampler=eval_sampler, batch_size=args.batch_size, collate_fn=DefaultDataCollator().collate_batch
     )
 
-    head_score_predictor = RNNHeadPredictor(12, 12, 64, rnn_layers=2)
-    optimizer = torch.optim.Adam(head_score_predictor.parameters(), lr=args.predictor_lr)
+    head_score_predictor = RNNHeadPredictor(12, 12, 32, rnn_layers=2)
+    optimizer = torch.optim.SGD(head_score_predictor.parameters(), lr=args.predictor_lr)
+    head_score_predictor.to(args.device)
     l1_loss = SparseLoss()
-    search_optimal_heads(args, model, head_score_predictor, optimizer, l1_loss, eval_dataloader)
+    l1_loss.to(args.device)
+    head_score = None
+    for e in range(10):
+        if head_score is not None:
+            head_score = head_score.clone().detach()
+        head_score = search_optimal_heads(args, model, head_score_predictor, optimizer, l1_loss, eval_dataloader, head_score)
     # # Compute head entropy and importance score
     # #  compute_heads_importance(args, model, eval_dataloader)
     #
