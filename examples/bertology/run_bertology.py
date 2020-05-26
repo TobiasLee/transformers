@@ -166,7 +166,7 @@ def mask_heads(args, model, eval_dataloader):
     num_to_mask = max(1, int(new_head_mask.numel() * args.masking_amount))
 
     current_score = original_score
-    while current_score >= original_score * args.masking_threshold:
+    while int(new_head_mask.numel()) >= args.head_num:  # current_score >= original_score * args.masking_threshold:
         head_mask = new_head_mask.clone()  # save current head mask
         # heads from least important to most - keep only not-masked heads
         head_importance[head_mask == 0.0] = float("Inf")
@@ -347,6 +347,7 @@ def main():
     parser.add_argument("--batch_size", default=1, type=int, help="Batch size.")
 
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--head_num", type=int, default=36)
     parser.add_argument("--local_rank", type=int, default=-1, help="local_rank for distributed training on gpus")
     parser.add_argument("--no_cuda", action="store_true", help="Whether not to use CUDA when available")
     parser.add_argument("--server_ip", type=str, default="", help="Can be used for distant debugging.")
