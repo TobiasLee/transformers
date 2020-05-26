@@ -440,7 +440,7 @@ def main():
     # and head pruning (remove masked heads and see the effect on the network)
     if args.try_masking and args.masking_threshold > 0.0 and args.masking_threshold < 1.0:
         head_mask = mask_heads(args, model, eval_dataloader)
-        prune_heads(args, model, eval_dataloader, head_mask)
+        # prune_heads(args, model, eval_dataloader, head_mask)
 
 
 if __name__ == "__main__":
