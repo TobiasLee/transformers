@@ -47,17 +47,22 @@ logger = logging.getLogger(__name__)
 
 
 class RNNHeadPredictor(nn.Module):
-    def __init__(self, head_num, layer_num, hidden_size, rnn_layers=2):
+    def __init__(self, head_num, layer_num, hidden_size, rnn_layers=2, bidirectional=True):
         super(RNNHeadPredictor, self).__init__()
-        self.rnn = nn.LSTM(input_size=head_num, hidden_size=hidden_size, num_layers=rnn_layers)
+        self.rnn = nn.LSTM(input_size=head_num, hidden_size=hidden_size,
+                           num_layers=rnn_layers, bidirectional=bidirectional)
         self.linear = nn.Linear(hidden_size, head_num)
         self.act = nn.Sigmoid()
         self.layer_num = layer_num
+        self.bidir = bidirectional
+        self.hidden_size = hidden_size
 
     def forward(self, heads_importance):
         # heads_importance: layer_num, 1, head_num ( seq_len, bsz, input_size)
         heads_importance = heads_importance.unsqueeze(1)
         output, hiddens = self.rnn(heads_importance)
+        if self.bidir:
+            output = output[:, :, :self.hidden_size] + output[:, :, self.hidden_size:] # add forward and backward ret
         head_score = self.act(self.linear(output.squeeze()))  # seq_len, 1, head_num
         return head_score
 
@@ -189,7 +194,7 @@ def search_optimal_heads(args, model, predictor, optimizer, sparse_loss, eval_da
             outputs[-1],
         )  # Loss and logits are the first, attention the last
         s_loss = sparse_loss(head_score)
-        total = loss  #+  s_loss
+        total = loss  # +  s_loss  观察到一个现象 经常是同一个head 不同 Layer 都会置成0  不过，效果还是有一定的提升的
         total.backward()  # Backpropagate to populate the gradients in the head mask
         #logger.info('val loss: %f  sparse_loss : %f' %( loss.item(), s_loss.item() ) )
         optimizer.step()  # update predictor score
