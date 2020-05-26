@@ -163,15 +163,16 @@ def mask_heads(args, model, eval_dataloader):
     logger.info("Pruning: original score: %f, threshold: %f", original_score, original_score * args.masking_threshold)
 
     new_head_mask = torch.ones_like(head_importance)
-    num_to_mask = max(1, int(new_head_mask.numel() * args.masking_amount))
+    num_to_mask = 4 #max(1, int(new_head_mask.numel() * args.masking_amount))
 
     current_score = original_score
-    while int(new_head_mask.numel()) >= args.head_num:  # current_score >= original_score * args.masking_threshold:
+    while int(new_head_mask.sum()) >= args.head_num:  # current_score >= original_score * args.masking_threshold:
         head_mask = new_head_mask.clone()  # save current head mask
         # heads from least important to most - keep only not-masked heads
         head_importance[head_mask == 0.0] = float("Inf")
         current_heads_to_mask = head_importance.view(-1).sort()[1]
-
+        #print(int(new_head_mask.numel()))
+        #print(int(new_head_mask.numel()) >= args.head_num)
         if len(current_heads_to_mask) <= num_to_mask:
             break
 
