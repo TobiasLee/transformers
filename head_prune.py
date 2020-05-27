@@ -45,12 +45,29 @@ from transformers import (
 
 logger = logging.getLogger(__name__)
 
+class MLPPredictor(nn.Module):
+    def __init__(self, head_num=12, layer_num=12, hidden_size=128):
+        super(MLPPredictor, self).__init__()
+        self.hidden1 = nn.Linear(head_num * layer_num, hidden_size)
+        self.act = nn.ReLU()
+        self.hidden2 = nn.Linear(hidden_size, head_num * layer_num)
+        self.output = nn.Sigmoid()
+        self.layer_num = layer_num
+        self.head_num = head_num
+
+    def forward(self, head_importance):
+        head_importance = head_importance.view(1, -1)  # flattn
+        hidden1 = self.hidden1(head_importance)
+        head_score = self.output(self.hidden2(self.act(hidden1)))
+        head_score = head_score.view(self.layer_num, self.head_num).contiguous()
+        return head_score
+
 
 class RNNHeadPredictor(nn.Module):
     def __init__(self, head_num, layer_num, hidden_size, rnn_layers=2, bidirectional=True, dropout=0.5):
         super(RNNHeadPredictor, self).__init__()
-        self.rnn = nn.GRU(input_size=head_num,  hidden_size=hidden_size,
-                           num_layers=rnn_layers, bidirectional=bidirectional)
+        self.rnn = nn.GRU(input_size=head_num, hidden_size=hidden_size,
+                          num_layers=rnn_layers, bidirectional=bidirectional)
         self.linear = nn.Linear(hidden_size, head_num)
         self.act = nn.Sigmoid()
         self.layer_num = layer_num
@@ -62,13 +79,14 @@ class RNNHeadPredictor(nn.Module):
         self.linear.weight.data.uniform_(-0.1, 0.1)
         self.linear.bias.data.uniform_(-0.1, 0.1)
         self.dropout = nn.Dropout(p=dropout)
+
     def forward(self, heads_importance):
         # heads_importance: layer_num, 1, head_num ( seq_len, bsz, input_size)
         heads_importance = heads_importance.unsqueeze(1)
         output, hiddens = self.rnn(heads_importance)
-        output = self.dropout(output) 
+        output = self.dropout(output)
         if self.bidir:
-            output = output[:, :, :self.hidden_size] + output[:, :, self.hidden_size:] # add forward and backward ret
+            output = output[:, :, :self.hidden_size] + output[:, :, self.hidden_size:]  # add forward and backward ret
         head_score = self.act(self.linear(output.squeeze()))  # seq_len, 1, head_num
         return head_score
 
@@ -165,8 +183,8 @@ def compute_heads_importance(
     if compute_importance:
         np.save(os.path.join(args.output_dir, "head_importance.npy"), head_importance.detach().cpu().numpy())
 
-    #logger.info("Attention entropies")
-    #print_2d_tensor(attn_entropy)
+    # logger.info("Attention entropies")
+    # print_2d_tensor(attn_entropy)
     logger.info("Head importance scores")
     print_2d_tensor(head_importance)
     logger.info("Head ranked by importance scores")
@@ -181,10 +199,12 @@ def compute_heads_importance(
 
 
 def search_optimal_heads(args, model, predictor, optimizer, sparse_loss, eval_dataloader, head_score):
-    _, head_importance, preds, labels = compute_heads_importance(args, model, eval_dataloader, compute_entropy=False, head_mask=head_score)
+    _, head_importance, preds, labels = compute_heads_importance(args, model, eval_dataloader, compute_entropy=False,
+                                                                 head_mask=head_score)
     preds = np.argmax(preds, axis=1) if args.output_mode == "classification" else np.squeeze(preds)
     original_score = glue_compute_metrics(args.task_name, preds, labels)[args.metric_name]
-    logger.info("Pruning: current  score: %f", original_score) # , threshold: %f , original_score * args.masking_threshold)
+    logger.info("Pruning: current  score: %f",
+                original_score)  # , threshold: %f , original_score * args.masking_threshold)
     head_score = predictor(head_importance.transpose(1, 0))
 
     for step, inputs in enumerate(tqdm(eval_dataloader, desc="Iteration", disable=args.local_rank not in [-1, 0])):
@@ -200,18 +220,19 @@ def search_optimal_heads(args, model, predictor, optimizer, sparse_loss, eval_da
             outputs[-1],
         )  # Loss and logits are the first, attention the last
         s_loss = sparse_loss(head_score)
-        total = loss  + args.sparse_ratio *  s_loss  #  观察到一个现象 经常是同一个head 不同 Layer 都会置成0  不过，效果还是有一定的提升的
-        head_importance = torch.autograd.grad(loss, head_score, retain_graph=True)[0].abs().detach() 
+        total = loss + args.sparse_ratio * s_loss  # 观察到一个现象 经常是同一个head 不同 Layer 都会置成0  不过，效果还是有一定的提升的
+        head_importance = torch.autograd.grad(loss, head_score, retain_graph=True)[0].abs().detach()
         total.backward()  # Backpropagate to populate the gradients in the head mask
         # head_importance = head_score.grad.abs().detach()
         # print(head_score.grad)
-        #logger.info('val loss: %f  sparse_loss : %f' %( loss.item(), s_loss.item() ) )
+        # logger.info('val loss: %f  sparse_loss : %f' %( loss.item(), s_loss.item() ) )
         optimizer.step()  # update predictor score
         head_score = predictor(head_importance.transpose(1, 0))  # update head score
     logger.info('current total loss: %f' % total.item())
     logger.info('current head score')
     print_2d_tensor(head_score)
-    return head_score 
+    return head_score
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -283,7 +304,6 @@ def main():
         help="Don't normalize all importance scores between 0 and 1",
     )
 
-
     parser.add_argument(
         "--masking_threshold",
         default=0.9,
@@ -305,7 +325,6 @@ def main():
     parser.add_argument("--batch_size", default=1, type=int, help="Batch size.")
 
     parser.add_argument("--seed", type=int, default=42)
-
 
     parser.add_argument("--predictor_lr", type=float, default=1e-3)
     parser.add_argument("--epoch_num", type=int, default=20)
@@ -396,7 +415,8 @@ def main():
         eval_dataset, sampler=eval_sampler, batch_size=args.batch_size, collate_fn=DefaultDataCollator().collate_batch
     )
 
-    head_score_predictor = RNNHeadPredictor(12, 12, 128, rnn_layers=2)
+    # head_score_predictor = RNNHeadPredictor(12, 12, 128, rnn_layers=2)
+    head_score_predictor = MLPPredictor(12, 12, 128)
     optimizer = torch.optim.Adam(head_score_predictor.parameters(), lr=args.predictor_lr)
     head_score_predictor.to(args.device)
     l1_loss = SparseLoss()
@@ -405,15 +425,18 @@ def main():
     for e in range(args.epoch_num):
         if head_score is not None:
             head_score = head_score.clone().detach()
-        head_score = search_optimal_heads(args, model, head_score_predictor, optimizer, l1_loss, eval_dataloader, head_score)
+        head_score = search_optimal_heads(args, model, head_score_predictor, optimizer, l1_loss, eval_dataloader,
+                                          head_score)
     head_score = head_score.clone().detach()
-    _, head_importance, preds, labels = compute_heads_importance(args, model, eval_dataloader, compute_entropy=False, compute_importance=True, head_mask=head_score)
+    _, head_importance, preds, labels = compute_heads_importance(args, model, eval_dataloader, compute_entropy=False,
+                                                                 compute_importance=True, head_mask=head_score)
     head_score = head_score_predictor(head_importance.transpose(1, 0))
     head_score = head_score.clone().detach()
-    _, head_importance, preds, labels = compute_heads_importance(args, model, eval_dataloader, compute_entropy=False, compute_importance=False, head_mask=head_score)
+    _, head_importance, preds, labels = compute_heads_importance(args, model, eval_dataloader, compute_entropy=False,
+                                                                 compute_importance=False, head_mask=head_score)
     preds = np.argmax(preds, axis=1) if args.output_mode == "classification" else np.squeeze(preds)
     final_score = glue_compute_metrics(args.task_name, preds, labels)[args.metric_name]
-    logger.info("final score %f" % final_score )
+    logger.info("final score %f" % final_score)
     # # Compute head entropy and importance score
     # #  compute_heads_importance(args, model, eval_dataloader)
     #
