@@ -56,7 +56,7 @@ class MLPPredictor(nn.Module):
         self.head_num = head_num
 
     def forward(self, head_importance):
-        head_importance = head_importance.view(1, -1)  # flattn
+        head_importance = head_importance.reshape(1, -1)  # flattn
         hidden1 = self.hidden1(head_importance)
         head_score = self.output(self.hidden2(self.act(hidden1)))
         head_score = head_score.view(self.layer_num, self.head_num).contiguous()
