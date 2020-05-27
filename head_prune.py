@@ -438,8 +438,8 @@ def main():
     final_score = glue_compute_metrics(args.task_name, preds, labels)[args.metric_name]
     logger.info("final score %f" % final_score)
     with open(os.path.join(args.output_dir, 'mask_result.txt'), 'w') as f:
-        f.write("final score: %.5f" % final_score)
-        f.write("head sum: %f" % head_score.sum().item())
+        f.write("final score: %.5f\n" % final_score)
+        f.write("head sum: %f\n" % head_score.sum().item())
     np.save(os.path.join(args.output_dir, "learned_mask.npy"), head_score.detach().cpu().numpy())
     # # Compute head entropy and importance score
     # #  compute_heads_importance(args, model, eval_dataloader)
