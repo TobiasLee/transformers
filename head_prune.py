@@ -328,7 +328,7 @@ def main():
 
     parser.add_argument("--predictor_lr", type=float, default=1e-3)
     parser.add_argument("--epoch_num", type=int, default=20)
-    parser.add_argument("--sparse_ratio", type=float, default=1e-3)
+    parser.add_argument("--sparse_ratio", type=float, default=0.0)
     parser.add_argument("--local_rank", type=int, default=-1, help="local_rank for distributed training on gpus")
     parser.add_argument("--no_cuda", action="store_true", help="Whether not to use CUDA when available")
     parser.add_argument("--server_ip", type=str, default="", help="Can be used for distant debugging.")
