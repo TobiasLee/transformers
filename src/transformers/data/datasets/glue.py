@@ -14,7 +14,6 @@ from ...tokenization_xlm_roberta import XLMRobertaTokenizer
 from ..processors.glue import glue_convert_examples_to_features, glue_output_modes, glue_processors
 from ..processors.utils import InputFeatures
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -36,7 +35,7 @@ class GlueDataTrainingArguments:
         default=128,
         metadata={
             "help": "The maximum total input sequence length after tokenization. Sequences longer "
-            "than this will be truncated, sequences shorter will be padded."
+                    "than this will be truncated, sequences shorter will be padded."
         },
     )
     overwrite_cache: bool = field(
@@ -58,11 +57,11 @@ class GlueDataset(Dataset):
     features: List[InputFeatures]
 
     def __init__(
-        self,
-        args: GlueDataTrainingArguments,
-        tokenizer: PreTrainedTokenizer,
-        limit_length: Optional[int] = None,
-        evaluate=False,
+            self,
+            args: GlueDataTrainingArguments,
+            tokenizer: PreTrainedTokenizer,
+            limit_length: Optional[int] = None,
+            evaluate=False,
     ):
         self.args = args
         processor = glue_processors[args.task_name]()
@@ -90,9 +89,9 @@ class GlueDataset(Dataset):
                 logger.info(f"Creating features from dataset file at {args.data_dir}")
                 label_list = processor.get_labels()
                 if args.task_name in ["mnli", "mnli-mm"] and tokenizer.__class__ in (
-                    RobertaTokenizer,
-                    RobertaTokenizerFast,
-                    XLMRobertaTokenizer,
+                        RobertaTokenizer,
+                        RobertaTokenizerFast,
+                        XLMRobertaTokenizer,
                 ):
                     # HACK(label indices are swapped in RoBERTa pretrained model)
                     label_list[1], label_list[2] = label_list[2], label_list[1]
@@ -110,15 +109,38 @@ class GlueDataset(Dataset):
                     label_list=label_list,
                     output_mode=self.output_mode,
                 )
+                self.features_for_head_pruning = self.features[: len(self.features) // 2]
+                self.features_for_dev = self.features[len(self.features) // 2:]
                 start = time.time()
                 torch.save(self.features, cached_features_file)
                 # ^ This seems to take a lot of time so I want to investigate why and how we can improve.
                 logger.info(
                     "Saving features into cached file %s [took %.3f s]", cached_features_file, time.time() - start
                 )
+        self.mode = 'all'
+        self.current_idx = 0
 
     def __len__(self):
-        return len(self.features)
+        if self.mode == "all":
+            return len(self.features)  # do not split
+        elif self.mode == 'half':  # use half to searching optimal architecture
+            if self.current_idx == 0:  # half
+                return len(self.features_for_head_pruning)
+            elif self.current_idx == 1:
+                return len(self.features_for_dev)
 
     def __getitem__(self, i) -> InputFeatures:
-        return self.features[i]
+        if self.mode == "all":
+            return self.features[i]  # do not split
+        elif self.mode == 'half':  # use half to searching optimal architecture
+            if self.current_idx == 0:  # half
+                return self.features_for_head_pruning[i]
+            elif self.current_idx == 1:
+                return self.features_for_dev[i]
+
+    def set_mode(self, mode='all'):
+        assert mode in ['all', 'half'], "Only support half or all mode"
+        self.mode = mode
+
+    def set_index(self, index):
+        self.current_idx = index
