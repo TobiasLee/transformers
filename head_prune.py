@@ -356,7 +356,7 @@ def main():
 
     parser.add_argument("--predictor_lr", type=float, default=1e-3)
     parser.add_argument("--epoch_num", type=int, default=20)
-    parser.add_argument("--sparse_ratio", type=float, default=1e-3)
+    parser.add_argument("--sparse_ratio", type=float, default=0.0)
     parser.add_argument("--local_rank", type=int, default=-1, help="local_rank for distributed training on gpus")
     parser.add_argument("--no_cuda", action="store_true", help="Whether not to use CUDA when available")
     parser.add_argument("--server_ip", type=str, default="", help="Can be used for distant debugging.")
@@ -437,7 +437,7 @@ def main():
     # Prepare dataset for the GLUE task
     eval_dataset = GlueDataset(args, tokenizer=tokenizer, evaluate=True)
     eval_dataset.set_mode('half')
-    eval_dataset.set_idnex(0)  # use the first half
+    eval_dataset.set_index(0)  # use the first half
     if args.data_subset > 0:
         eval_dataset = Subset(eval_dataset, list(range(min(args.data_subset, len(eval_dataset)))))
     eval_sampler = RandomSampler(eval_dataset) if args.local_rank == -1 else DistributedSampler(eval_dataset)
@@ -467,21 +467,24 @@ def main():
     # evaluate masked model on the other half dev set
     test_dataset = GlueDataset(args, tokenizer=tokenizer, evaluate=True)
     test_dataset.set_mode('half')
-    test_dataset.set_idnex(1)  # use the other half
-
+    test_dataset.set_index(1)  # use the other half
+#
     if args.data_subset > 0:
         test_dataset = Subset(test_dataset, list(range(min(args.data_subset, len(test_dataset)))))
     test_sampler = RandomSampler(test_dataset) if args.local_rank == -1 else DistributedSampler(eval_dataset)
     test_dataloader = DataLoader(
         test_dataset, sampler=test_sampler, batch_size=args.batch_size, collate_fn=DefaultDataCollator().collate_batch
     )
-
+#
     preds, labels = evaluate_masked_model(args, model, test_dataloader, head_score)
     preds = np.argmax(preds, axis=1) if args.output_mode == "classification" else np.squeeze(preds)
-    final_score = glue_compute_metrics(args.task_name, preds, labels)[args.metric_name]
-    logger.info("final score %f" % final_score)
+    final_score_dict = glue_compute_metrics(args.task_name, preds, labels)[args.metric_name]
     with open(os.path.join(args.output_dir, 'masked_result.txt'), 'w') as f:
-        f.write("final score: %.5f\n" % final_score)
+        logger.info("***** Test results {} *****".format(eval_dataset.args.task_name))
+        for key, value in final_score_dict.items():
+            logger.info("  %s = %s", key, value)
+            f.write("%s = %s\n" % (key, value))
+
         f.write("head sum: %f\n" % head_score.sum().item())
     np.save(os.path.join(args.output_dir, "learned_mask.npy"), head_score.detach().cpu().numpy())
     # # Compute head entropy and importance score

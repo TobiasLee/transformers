@@ -42,8 +42,33 @@ from transformers import (
     set_seed,
 )
 
-
 logger = logging.getLogger(__name__)
+
+def evaluate_masked_model(args, model, eval_dataloader, head_mask):
+    preds, labels = None, None
+    for step, inputs in enumerate(tqdm(eval_dataloader, desc="Iteration", disable=args.local_rank not in [-1, 0])):
+        for k, v in inputs.items():
+            inputs[k] = v.to(args.device)
+            # logger.info(k)
+
+        # Do a forward pass (not with torch.no_grad() since we need gradients for importance score - see below)
+        model.eval()
+        with torch.no_grad():
+            outputs = model(**inputs, head_mask=head_mask)
+            loss, logits, all_attentions = (
+                outputs[0],
+                outputs[1],
+                outputs[-1],
+            )  # Loss and logits are the first, attention the last
+
+        # Also store our logits/labels if we want to compute metrics afterwards
+        if preds is None:
+            preds = logits.detach().cpu().numpy()
+            labels = inputs["labels"].detach().cpu().numpy()
+        else:
+            preds = np.append(preds, logits.detach().cpu().numpy(), axis=0)
+            labels = np.append(labels, inputs["labels"].detach().cpu().numpy(), axis=0)
+    return preds, labels
 
 
 def entropy(p):
@@ -163,10 +188,9 @@ def mask_heads(args, model, eval_dataloader):
     logger.info("Pruning: original score: %f, threshold: %f", original_score, original_score * args.masking_threshold)
 
     new_head_mask = torch.ones_like(head_importance)
-    num_to_mask = 4 #max(1, int(new_head_mask.numel() * args.masking_amount))
+    num_to_mask = args.per_iter_mask  #max(1, int(new_head_mask.numel() * args.masking_amount))
 
-    current_score = original_score
-    while int(new_head_mask.sum()) >= args.head_num:  # current_score >= original_score * args.masking_threshold:
+    while int(new_head_mask.sum()) > args.head_num:  # current_score >= original_score * args.masking_threshold:
         head_mask = new_head_mask.clone()  # save current head mask
         # heads from least important to most - keep only not-masked heads
         head_importance[head_mask == 0.0] = float("Inf")
@@ -198,7 +222,6 @@ def mask_heads(args, model, eval_dataloader):
             new_head_mask.sum(),
             new_head_mask.sum() / new_head_mask.numel() * 100,
         )
-
     logger.info("Final head mask")
     print_2d_tensor(head_mask)
     np.save(os.path.join(args.output_dir, "head_mask.npy"), head_mask.detach().cpu().numpy())
@@ -348,7 +371,9 @@ def main():
     parser.add_argument("--batch_size", default=1, type=int, help="Batch size.")
 
     parser.add_argument("--seed", type=int, default=42)
+
     parser.add_argument("--head_num", type=int, default=36)
+    parser.add_argument("--per_iter_mask", type=int, default=1)
     parser.add_argument("--local_rank", type=int, default=-1, help="local_rank for distributed training on gpus")
     parser.add_argument("--no_cuda", action="store_true", help="Whether not to use CUDA when available")
     parser.add_argument("--server_ip", type=str, default="", help="Can be used for distant debugging.")
@@ -427,7 +452,13 @@ def main():
     logger.info("Training/evaluation parameters %s", args)
 
     # Prepare dataset for the GLUE task
+<<<<<<< HEAD
     eval_dataset = GlueDataset(args, tokenizer=tokenizer, mode="dev")
+=======
+    eval_dataset = GlueDataset(args, tokenizer=tokenizer, evaluate=True)
+    eval_dataset.set_mode('half')
+    eval_dataset.set_index(0) # use first half
+>>>>>>> a2593325181e262e293d0dc1a044bf203bfd81b7
     if args.data_subset > 0:
         eval_dataset = Subset(eval_dataset, list(range(min(args.data_subset, len(eval_dataset)))))
     eval_sampler = RandomSampler(eval_dataset) if args.local_rank == -1 else DistributedSampler(eval_dataset)
@@ -443,7 +474,28 @@ def main():
     if args.try_masking and args.masking_threshold > 0.0 and args.masking_threshold < 1.0:
         head_mask = mask_heads(args, model, eval_dataloader)
         # prune_heads(args, model, eval_dataloader, head_mask)
+        test_dataset = GlueDataset(args, tokenizer=tokenizer, evaluate=True)
+        test_dataset.set_mode('half')
+        test_dataset.set_index(1)  # use the other half
 
+        if args.data_subset > 0:
+            test_dataset = Subset(test_dataset, list(range(min(args.data_subset, len(test_dataset)))))
+        test_sampler = RandomSampler(test_dataset) if args.local_rank == -1 else DistributedSampler(eval_dataset)
+        test_dataloader = DataLoader(
+            test_dataset, sampler=test_sampler, batch_size=args.batch_size,
+            collate_fn=DefaultDataCollator().collate_batch
+        )
+
+        preds, labels = evaluate_masked_model(args, model, test_dataloader, head_mask)
+        preds = np.argmax(preds, axis=1) if args.output_mode == "classification" else np.squeeze(preds)
+        final_score_dict = glue_compute_metrics(args.task_name, preds, labels)
+        with open(os.path.join(args.output_dir, 'mask_result.txt'), 'w') as f:
+            logger.info("***** Eval results {} *****".format(eval_dataset.args.task_name))
+            for key, value in final_score_dict.items():
+                logger.info("  %s = %s", key, value)
+                f.write("%s = %s\n" % (key, value))
+
+            f.write('remaining heads: %d\n' % head_mask.sum())
 
 if __name__ == "__main__":
     main()
