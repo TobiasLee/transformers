@@ -44,6 +44,7 @@ from transformers import (
 
 logger = logging.getLogger(__name__)
 
+
 def evaluate_masked_model(args, model, eval_dataloader, head_mask):
     preds, labels = None, None
     for step, inputs in enumerate(tqdm(eval_dataloader, desc="Iteration", disable=args.local_rank not in [-1, 0])):
@@ -89,7 +90,8 @@ def print_2d_tensor(tensor):
 
 
 def compute_heads_importance(
-    args, model, eval_dataloader, compute_entropy=True, compute_importance=True, head_mask=None, actually_pruned=False
+        args, model, eval_dataloader, compute_entropy=True, compute_importance=True, head_mask=None,
+        actually_pruned=False
 ):
     """ This method shows how to compute:
         - head attention entropy
@@ -162,7 +164,6 @@ def compute_heads_importance(
     if compute_importance:
         np.save(os.path.join(args.output_dir, "head_importance.npy"), head_importance.detach().cpu().numpy())
 
-
     logger.info("Attention entropies")
     print_2d_tensor(attn_entropy)
     logger.info("Head importance scores")
@@ -188,15 +189,15 @@ def mask_heads(args, model, eval_dataloader):
     logger.info("Pruning: original score: %f, threshold: %f", original_score, original_score * args.masking_threshold)
 
     new_head_mask = torch.ones_like(head_importance)
-    num_to_mask = args.per_iter_mask  #max(1, int(new_head_mask.numel() * args.masking_amount))
+    num_to_mask = args.per_iter_mask  # max(1, int(new_head_mask.numel() * args.masking_amount))
 
     while int(new_head_mask.sum()) > args.head_num:  # current_score >= original_score * args.masking_threshold:
         head_mask = new_head_mask.clone()  # save current head mask
         # heads from least important to most - keep only not-masked heads
         head_importance[head_mask == 0.0] = float("Inf")
         current_heads_to_mask = head_importance.view(-1).sort()[1]
-        #print(int(new_head_mask.numel()))
-        #print(int(new_head_mask.numel()) >= args.head_num)
+        # print(int(new_head_mask.numel()))
+        # print(int(new_head_mask.numel()) >= args.head_num)
         if len(current_heads_to_mask) <= num_to_mask:
             break
 
@@ -208,7 +209,6 @@ def mask_heads(args, model, eval_dataloader):
         new_head_mask = new_head_mask.view_as(head_mask)
         new_head_mask = new_head_mask.clone().detach()
         print_2d_tensor(new_head_mask)
-
 
         # Compute metric and head importance again
         _, head_importance, preds, labels = compute_heads_importance(
@@ -366,7 +366,7 @@ def main():
         default=128,
         type=int,
         help="The maximum total input sequence length after WordPiece tokenization. \n"
-        "Sequences longer than this will be truncated, sequences shorter padded.",
+             "Sequences longer than this will be truncated, sequences shorter padded.",
     )
     parser.add_argument("--batch_size", default=1, type=int, help="Batch size.")
 
@@ -454,7 +454,7 @@ def main():
     # Prepare dataset for the GLUE task
     eval_dataset = GlueDataset(args, tokenizer=tokenizer, evaluate=True)
     eval_dataset.set_mode('half')
-    eval_dataset.set_index(0) # use first half
+    eval_dataset.set_index(0)  # use first half
     if args.data_subset > 0:
         eval_dataset = Subset(eval_dataset, list(range(min(args.data_subset, len(eval_dataset)))))
     eval_sampler = RandomSampler(eval_dataset) if args.local_rank == -1 else DistributedSampler(eval_dataset)
@@ -492,6 +492,7 @@ def main():
                 f.write("%s = %s\n" % (key, value))
 
             f.write('remaining heads: %d\n' % head_mask.sum())
+
 
 if __name__ == "__main__":
     main()
