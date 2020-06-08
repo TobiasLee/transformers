@@ -39,8 +39,7 @@ from transformers import (
     TrainingArguments,
     set_seed,
 )
-from utils_ner import NerDataset, Split, get_label_ids
-
+from utils_ner import NerDataset, Split, get_labels
 from src.transformers import DefaultDataCollator
 
 logger = logging.getLogger(__name__)
@@ -78,8 +77,8 @@ class DataTrainingArguments:
     data_dir: str = field(
         metadata={"help": "The input data dir. Should contain the .txt files for a CoNLL-2003-formatted task."}
     )
-    label_ids: Optional[str] = field(
-        metadata={"help": "Path to a file containing all label_ids. If not specified, CoNLL-2003 label_ids are used."}
+    labels: Optional[str] = field(
+        metadata={"help": "Path to a file containing all labels. If not specified, CoNLL-2003 labels are used."}
     )
     max_seq_length: int = field(
         default=128,
@@ -110,7 +109,7 @@ class DataTrainingArguments:
     )
 
 
-def align_predictions(predictions: np.ndarray, label_ids: np.ndarray, label_map) -> Tuple[List[int], List[int]]:
+def align_predictions(predictions: np.ndarray, labels: np.ndarray, label_map) -> Tuple[List[int], List[int]]:
     preds = np.argmax(predictions, axis=2)
 
     batch_size, seq_len = preds.shape
@@ -120,15 +119,15 @@ def align_predictions(predictions: np.ndarray, label_ids: np.ndarray, label_map)
 
     for i in range(batch_size):
         for j in range(seq_len):
-            if label_ids[i, j] != nn.CrossEntropyLoss().ignore_index:
-                out_label_list[i].append(label_map[label_ids[i][j]])
+            if labels[i, j] != nn.CrossEntropyLoss().ignore_index:
+                out_label_list[i].append(label_map[labels[i][j]])
                 preds_list[i].append(label_map[preds[i][j]])
 
     return preds_list, out_label_list
 
 
-def compute_metrics(p: EvalPrediction) -> Dict:
-    preds_list, out_label_list = align_predictions(p.predictions, p.label_ids)
+def compute_metrics(p: EvalPrediction, label_map) -> Dict:
+    preds_list, out_label_list = align_predictions(p.predictions, p.label_ids, label_map)
     return {
         "precision": precision_score(out_label_list, preds_list),
         "recall": recall_score(out_label_list, preds_list),
@@ -137,7 +136,7 @@ def compute_metrics(p: EvalPrediction) -> Dict:
 
 
 def evaluate_masked_model(args, model, eval_dataloader, head_mask):
-    preds, label_ids = None, None
+    preds, labels = None, None
     for step, inputs in enumerate(tqdm(eval_dataloader, desc="Iteration", disable=args.local_rank not in [-1, 0])):
         for k, v in inputs.items():
             inputs[k] = v.to(args.device)
@@ -153,14 +152,14 @@ def evaluate_masked_model(args, model, eval_dataloader, head_mask):
                 outputs[-1],
             )  # Loss and logits are the first, attention the last
 
-        # Also store our logits/label_ids if we want to compute metrics afterwards
+        # Also store our logits/labels if we want to compute metrics afterwards
         if preds is None:
             preds = logits.detach().cpu().numpy()
-            label_ids = inputs["label_ids"].detach().cpu().numpy()
+            labels = inputs["labels"].detach().cpu().numpy()
         else:
             preds = np.append(preds, logits.detach().cpu().numpy(), axis=0)
-            label_ids = np.append(label_ids, inputs["label_ids"].detach().cpu().numpy(), axis=0)
-    return preds, label_ids
+            labels = np.append(labels, inputs["labels"].detach().cpu().numpy(), axis=0)
+    return preds, labels
 
 
 def entropy(p):
@@ -202,7 +201,7 @@ def compute_heads_importance(
         head_mask = None
 
     preds = None
-    label_ids = None
+    labels = None
     tot_tokens = 0.0
     for step, inputs in enumerate(tqdm(eval_dataloader, desc="Iteration", disable=args.local_rank not in [-1, 0])):
         for k, v in inputs.items():
@@ -226,14 +225,13 @@ def compute_heads_importance(
 
         if compute_importance:
             head_importance += head_mask.grad.abs().detach()
-
-        # Also store our logits/label_ids if we want to compute metrics afterwards
+        # Also store our logits/labels if we want to compute metrics afterwards
         if preds is None:
             preds = logits.detach().cpu().numpy()
-            label_ids = inputs["label_ids"].detach().cpu().numpy()
+            labels = inputs["labels"].detach().cpu().numpy()
         else:
             preds = np.append(preds, logits.detach().cpu().numpy(), axis=0)
-            label_ids = np.append(label_ids, inputs["label_ids"].detach().cpu().numpy(), axis=0)
+            labels = np.append(labels, inputs["labels"].detach().cpu().numpy(), axis=0)
 
         tot_tokens += inputs["attention_mask"].float().detach().sum().data
 
@@ -241,12 +239,12 @@ def compute_heads_importance(
     attn_entropy /= tot_tokens
     head_importance /= tot_tokens
     # Layerwise importance normalization
-    if not args.dont_normalize_importance_by_layer:
+    if not False: #args.dont_normalize_importance_by_layer:
         exponent = 2
         norm_by_layer = torch.pow(torch.pow(head_importance, exponent).sum(-1), 1 / exponent)
         head_importance /= norm_by_layer.unsqueeze(-1) + 1e-20
 
-    if not args.dont_normalize_global_importance:
+    if not False: # args.dont_normalize_global_importance:
         head_importance = (head_importance - head_importance.min()) / (head_importance.max() - head_importance.min())
 
     # Print/save matrices
@@ -267,16 +265,16 @@ def compute_heads_importance(
     head_ranks = head_ranks.view_as(head_importance)
     print_2d_tensor(head_ranks)
 
-    return attn_entropy, head_importance, preds, label_ids
+    return attn_entropy, head_importance, preds, labels
 
 
-def mask_heads(args, model, eval_dataloader, metric_name='f1', head_num=144, per_iter_mask=1):
+def mask_heads(args, model, eval_dataloader, metric_name='f1', head_num=144, per_iter_mask=1, label_map=None):
     """ This method shows how to mask head (set some heads to zero), to test the effect on the network,
         based on the head importance scores, as described in Michel et al. (http://arxiv.org/abs/1905.10650)
     """
-    _, head_importance, preds, label_ids = compute_heads_importance(args, model, eval_dataloader, compute_entropy=False)
-    original_score = compute_metrics(EvalPrediction(preds, label_ids))[metric_name]
-    logger.info("Pruning: original score: %f, threshold: %f", original_score, original_score * args.masking_threshold)
+    _, head_importance, preds, labels = compute_heads_importance(args, model, eval_dataloader, compute_entropy=False)
+    original_score =  compute_metrics(EvalPrediction(preds, labels), label_map)[metric_name]
+    logger.info("Pruning: original score: %f, target left head num: %d", original_score, head_num )
 
     new_head_mask = torch.ones_like(head_importance)
     num_to_mask = per_iter_mask  # max(1, int(new_head_mask.numel() * args.masking_amount))
@@ -299,12 +297,12 @@ def mask_heads(args, model, eval_dataloader, metric_name='f1', head_num=144, per
         print_2d_tensor(new_head_mask)
 
         # Compute metric and head importance again
-        _, head_importance, preds, label_ids = compute_heads_importance(
+        _, head_importance, preds, labels = compute_heads_importance(
             args, model, eval_dataloader, compute_entropy=False, head_mask=new_head_mask, metric_name=metric_name
         )
         # preds = np.argmax(preds, axis=1) if args.output_mode == "classification" else np.squeeze(preds)
-        # current_score = glue_compute_metrics(args.task_name, preds, label_ids)[args.metric_name]
-        current_score = compute_metrics(EvalPrediction(predictions=preds, label_ids=label_ids))[metric_name]
+        # current_score = glue_compute_metrics(args.task_name, preds, labels)[args.metric_name]
+        current_score =  compute_metrics(EvalPrediction(preds, labels), label_map)[metric_name]
         logger.info(
             "Masking: current score: %f, remaining heads %d (%.1f percents)",
             current_score,
@@ -318,19 +316,19 @@ def mask_heads(args, model, eval_dataloader, metric_name='f1', head_num=144, per
     return head_mask
 
 
-def prune_heads(args, model, eval_dataloader, head_mask, metric_name='f1'):
+def prune_heads(args, model, eval_dataloader, head_mask, metric_name='f1', label_map=None):
     """ This method shows how to prune head (remove heads weights) based on
         the head importance scores as described in Michel et al. (http://arxiv.org/abs/1905.10650)
     """
     # Try pruning and test time speedup
     # Pruning is like masking but we actually remove the masked weights
     before_time = datetime.now()
-    _, _, preds, label_ids = compute_heads_importance(
+    _, _, preds, labels = compute_heads_importance(
         args, model, eval_dataloader, compute_entropy=False, compute_importance=False, head_mask=head_mask
     )
     # preds = np.argmax(preds, axis=1) if args.output_mode == "classification" else np.squeeze(preds)
-    # score_masking = glue_compute_metrics(args.task_name, preds, label_ids)[args.metric_name]
-    score_masking = compute_metrics(EvalPrediction(preds, label_ids))[metric_name]
+    # score_masking = glue_compute_metrics(args.task_name, preds, labels)[args.metric_name]
+    score_masking =  compute_metrics(EvalPrediction(predictions=preds, labels=labels, label_map=label_map))[metric_name]
     original_time = datetime.now() - before_time
 
     original_num_params = sum(p.numel() for p in model.parameters())
@@ -344,7 +342,7 @@ def prune_heads(args, model, eval_dataloader, head_mask, metric_name='f1'):
     pruned_num_params = sum(p.numel() for p in model.parameters())
 
     before_time = datetime.now()
-    _, _, preds, label_ids = compute_heads_importance(
+    _, _, preds, labels = compute_heads_importance(
         args,
         model,
         eval_dataloader,
@@ -354,8 +352,8 @@ def prune_heads(args, model, eval_dataloader, head_mask, metric_name='f1'):
         actually_pruned=True,
     )
     # preds = np.argmax(preds, axis=1) if args.output_mode == "classification" else np.squeeze(preds)
-    # score_pruning = glue_compute_metrics(args.task_name, preds, label_ids)[args.metric_name]
-    score_pruning = compute_metrics(EvalPrediction(preds, label_ids))[metric_name]
+    # score_pruning = glue_compute_metrics(args.task_name, preds, labels)[args.metric_name]
+    score_pruning =compute_metrics(EvalPrediction(preds, labels), label_map)[metric_name]
 
     new_time = datetime.now() - before_time
 
@@ -412,9 +410,9 @@ def main():
     set_seed(training_args.seed)
 
     # Prepare CONLL-2003 task
-    label_ids = get_label_ids(data_args.label_ids)
-    label_map: Dict[int, str] = {i: label for i, label in enumerate(label_ids)}
-    num_label_ids = len(label_ids)
+    labels = get_labels(data_args.labels)
+    label_map: Dict[int, str] = {i: label for i, label in enumerate(labels)}
+    num_labels = len(labels)
 
     # Load pretrained model and tokenizer
     #
@@ -424,9 +422,9 @@ def main():
 
     config = AutoConfig.from_pretrained(
         model_args.config_name if model_args.config_name else model_args.model_name_or_path,
-        num_label_ids=num_label_ids,
+        num_labels=num_labels,
         id2label=label_map,
-        label2id={label: i for i, label in enumerate(label_ids)},
+        label2id={label: i for i, label in enumerate(labels)},
         cache_dir=model_args.cache_dir,
     )
     tokenizer = AutoTokenizer.from_pretrained(
@@ -459,7 +457,7 @@ def main():
     eval_dataset = NerDataset(
         data_dir=data_args.data_dir,
         tokenizer=tokenizer,
-        label_ids=label_ids,
+        labels=labels,
         model_type=config.model_type,
         max_seq_length=data_args.max_seq_length,
         overwrite_cache=data_args.overwrite_cache,
@@ -467,24 +465,23 @@ def main():
     )
     eval_dataset.set_mode('half')
     eval_dataset.set_index(0)  # use first half
-    if training_args.data_subset > 0:
-        eval_dataset = Subset(eval_dataset, list(range(min(training_args.data_subset, len(eval_dataset)))))
     eval_sampler = RandomSampler(eval_dataset) if training_args.local_rank == -1 else DistributedSampler(eval_dataset)
     eval_dataloader = DataLoader(
-        eval_dataset, sampler=eval_sampler, batch_size=training_args.batch_size,
+        eval_dataset, sampler=eval_sampler, batch_size=training_args.train_batch_size,
         collate_fn=DefaultDataCollator().collate_batch
     )
 
     if data_args.try_masking and 0.0 < data_args.masking_threshold < 1.0:
         head_mask = mask_heads(training_args, model, eval_dataloader,
                                metric_name=data_args.metric_name,
-                               head_num=data_args.headnum,
-                               per_iter_mask=data_args.per_iter_mask)
+                               head_num=data_args.head_num,
+                               per_iter_mask=data_args.per_iter_mask,
+                               label_map=label_map)
         # prune_heads(args, model, eval_dataloader, head_mask)
         test_dataset = NerDataset(
             data_dir=data_args.data_dir,
             tokenizer=tokenizer,
-            label_ids=label_ids,
+            labels=labels,
             model_type=config.model_type,
             max_seq_length=data_args.max_seq_length,
             overwrite_cache=data_args.overwrite_cache,
@@ -493,19 +490,17 @@ def main():
         test_dataset.set_mode('half')
         test_dataset.set_index(1)  # use the other half
 
-        if training_args.data_subset > 0:
-            test_dataset = Subset(test_dataset, list(range(min(training_args.data_subset, len(test_dataset)))))
         test_sampler = RandomSampler(test_dataset) if training_args.local_rank == -1 else DistributedSampler(
             eval_dataset)
         test_dataloader = DataLoader(
-            test_dataset, sampler=test_sampler, batch_size=training_args.batch_size,
+            test_dataset, sampler=test_sampler, batch_size=training_args.train_batch_size,
             collate_fn=DefaultDataCollator().collate_batch
         )
 
-        preds, labels_ids = evaluate_masked_model(training_args, model, test_dataloader, head_mask)
-        final_score_dict = compute_metrics(EvalPrediction(preds, label_ids))
+        preds, labels = evaluate_masked_model(training_args, model, test_dataloader, head_mask)
+        final_score_dict = compute_metrics(EvalPrediction(preds, labels), label_map)
         with open(os.path.join(training_args.output_dir, 'mask_result.txt'), 'w') as f:
-            logger.info("***** Eval results {} *****".format(eval_dataset.args.task_name))
+            logger.info("***** Eval results *****" )
             for key, value in final_score_dict.items():
                 logger.info("  %s = %s", key, value)
                 f.write("%s = %s\n" % (key, value))
