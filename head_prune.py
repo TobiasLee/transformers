@@ -478,10 +478,13 @@ def main():
 #
     preds, labels = evaluate_masked_model(args, model, test_dataloader, head_score)
     preds = np.argmax(preds, axis=1) if args.output_mode == "classification" else np.squeeze(preds)
-    final_score = glue_compute_metrics(args.task_name, preds, labels)[args.metric_name]
-    logger.info("final score %f" % final_score)
+    final_score_dict = glue_compute_metrics(args.task_name, preds, labels)[args.metric_name]
     with open(os.path.join(args.output_dir, 'masked_result.txt'), 'w') as f:
-        f.write("final score: %.5f\n" % final_score)
+        logger.info("***** Test results {} *****".format(eval_dataset.args.task_name))
+        for key, value in final_score_dict.items():
+            logger.info("  %s = %s", key, value)
+            f.write("%s = %s\n" % (key, value))
+
         f.write("head sum: %f\n" % head_score.sum().item())
     np.save(os.path.join(args.output_dir, "learned_mask.npy"), head_score.detach().cpu().numpy())
     # # Compute head entropy and importance score
