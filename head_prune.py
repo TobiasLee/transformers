@@ -437,7 +437,7 @@ def main():
     # Prepare dataset for the GLUE task
     eval_dataset = GlueDataset(args, tokenizer=tokenizer, evaluate=True)
     eval_dataset.set_mode('half')
-    eval_dataset.set_idnex(0)  # use the first half
+    eval_dataset.set_index(0)  # use the first half
     if args.data_subset > 0:
         eval_dataset = Subset(eval_dataset, list(range(min(args.data_subset, len(eval_dataset)))))
     eval_sampler = RandomSampler(eval_dataset) if args.local_rank == -1 else DistributedSampler(eval_dataset)
@@ -467,15 +467,15 @@ def main():
     # evaluate masked model on the other half dev set
     test_dataset = GlueDataset(args, tokenizer=tokenizer, evaluate=True)
     test_dataset.set_mode('half')
-    test_dataset.set_idnex(1)  # use the other half
-
+    test_dataset.set_index(1)  # use the other half
+#
     if args.data_subset > 0:
         test_dataset = Subset(test_dataset, list(range(min(args.data_subset, len(test_dataset)))))
     test_sampler = RandomSampler(test_dataset) if args.local_rank == -1 else DistributedSampler(eval_dataset)
     test_dataloader = DataLoader(
         test_dataset, sampler=test_sampler, batch_size=args.batch_size, collate_fn=DefaultDataCollator().collate_batch
     )
-
+#
     preds, labels = evaluate_masked_model(args, model, test_dataloader, head_score)
     preds = np.argmax(preds, axis=1) if args.output_mode == "classification" else np.squeeze(preds)
     final_score = glue_compute_metrics(args.task_name, preds, labels)[args.metric_name]
