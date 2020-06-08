@@ -680,7 +680,8 @@ class Trainer:
             shutil.rmtree(checkpoint)
 
     def evaluate(
-        self, eval_dataset: Optional[Dataset] = None, prediction_loss_only: Optional[bool] = None,
+        self, eval_dataset: Optional[Dataset] = None,
+            prediction_loss_only: Optional[bool] = None,
             head_mask=None
     ) -> Dict[str, float]:
         """
