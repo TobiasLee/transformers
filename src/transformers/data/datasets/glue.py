@@ -82,6 +82,8 @@ class GlueDataset(Dataset):
             if os.path.exists(cached_features_file) and not args.overwrite_cache:
                 start = time.time()
                 self.features = torch.load(cached_features_file)
+                self.features_for_head_pruning = self.features[: len(self.features) // 2]
+                self.features_for_dev = self.features[len(self.features) // 2:]
                 logger.info(
                     f"Loading features from cached file {cached_features_file} [took %.3f s]", time.time() - start
                 )
@@ -109,6 +111,7 @@ class GlueDataset(Dataset):
                     label_list=label_list,
                     output_mode=self.output_mode,
                 )
+                logger.infor("creating half features")
                 self.features_for_head_pruning = self.features[: len(self.features) // 2]
                 self.features_for_dev = self.features[len(self.features) // 2:]
                 start = time.time()
