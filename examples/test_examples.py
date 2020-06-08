@@ -31,7 +31,7 @@ sys.path.extend(SRC_DIRS)
 
 if SRC_DIRS is not None:
     import run_generation
-    import run_glue
+    import run_glue_mask
     import run_language_modeling
     import run_squad
 
@@ -54,7 +54,7 @@ class ExamplesTests(unittest.TestCase):
         logger.addHandler(stream_handler)
 
         testargs = """
-            run_glue.py
+            run_glue_mask.py
             --model_name_or_path bert-base-uncased
             --data_dir ./tests/fixtures/tests_samples/MRPC/
             --task_name mrpc
@@ -71,7 +71,7 @@ class ExamplesTests(unittest.TestCase):
             --max_seq_length=128
             """.split()
         with patch.object(sys, "argv", testargs):
-            result = run_glue.main()
+            result = run_glue_mask.main()
             del result["eval_loss"]
             for value in result.values():
                 self.assertGreaterEqual(value, 0.75)
