@@ -27,7 +27,7 @@ from .utils import require_multigpu, require_torch, slow, torch_device
 if is_torch_available():
     import torch
     from transformers import TransfoXLConfig, TransfoXLModel, TransfoXLLMHeadModel
-    from transformers.modeling_transfo_xl import TRANSFO_XL_PRETRAINED_MODEL_ARCHIVE_MAP
+    from transformers.modeling_transfo_xl import TRANSFO_XL_PRETRAINED_MODEL_ARCHIVE_LIST
 
 
 @require_torch
@@ -214,7 +214,7 @@ class TransfoXLModelTest(ModelTesterMixin, unittest.TestCase):
 
     @slow
     def test_model_from_pretrained(self):
-        for model_name in list(TRANSFO_XL_PRETRAINED_MODEL_ARCHIVE_MAP.keys())[:1]:
+        for model_name in TRANSFO_XL_PRETRAINED_MODEL_ARCHIVE_LIST[:1]:
             model = TransfoXLModel.from_pretrained(model_name)
             self.assertIsNotNone(model)
 
@@ -223,6 +223,7 @@ class TransfoXLModelLanguageGenerationTest(unittest.TestCase):
     @slow
     def test_lm_generate_transfo_xl_wt103(self):
         model = TransfoXLLMHeadModel.from_pretrained("transfo-xl-wt103")
+        model.to(torch_device)
         input_ids = torch.tensor(
             [
                 [
