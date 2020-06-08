@@ -41,9 +41,34 @@ from transformers import (
     glue_processors,
     set_seed,
 )
-from head_prune import evaluate_masked_model
 
 logger = logging.getLogger(__name__)
+
+def evaluate_masked_model(args, model, eval_dataloader, head_mask):
+    preds, labels = None, None
+    for step, inputs in enumerate(tqdm(eval_dataloader, desc="Iteration", disable=args.local_rank not in [-1, 0])):
+        for k, v in inputs.items():
+            inputs[k] = v.to(args.device)
+            # logger.info(k)
+
+        # Do a forward pass (not with torch.no_grad() since we need gradients for importance score - see below)
+        model.eval()
+        with torch.no_grad():
+            outputs = model(**inputs, head_mask=head_mask)
+            loss, logits, all_attentions = (
+                outputs[0],
+                outputs[1],
+                outputs[-1],
+            )  # Loss and logits are the first, attention the last
+
+        # Also store our logits/labels if we want to compute metrics afterwards
+        if preds is None:
+            preds = logits.detach().cpu().numpy()
+            labels = inputs["labels"].detach().cpu().numpy()
+        else:
+            preds = np.append(preds, logits.detach().cpu().numpy(), axis=0)
+            labels = np.append(labels, inputs["labels"].detach().cpu().numpy(), axis=0)
+    return preds, labels
 
 
 def entropy(p):
@@ -447,7 +472,7 @@ def main():
         # prune_heads(args, model, eval_dataloader, head_mask)
         test_dataset = GlueDataset(args, tokenizer=tokenizer, evaluate=True)
         test_dataset.set_mode('half')
-        test_dataset.set_idnex(1)  # use the other half
+        test_dataset.set_index(1)  # use the other half
 
         if args.data_subset > 0:
             test_dataset = Subset(test_dataset, list(range(min(args.data_subset, len(test_dataset)))))
