@@ -17,13 +17,18 @@
 
 import logging
 import os
+
+import numpy as np
 from dataclasses import dataclass
 from enum import Enum
 from typing import List, Optional, Union
 
 from filelock import FileLock
+from sklearn.metrics import precision_score, recall_score, f1_score
 
 from transformers import PreTrainedTokenizer, is_tf_available, is_torch_available
+
+from src.transformers import EvalPrediction
 
 logger = logging.getLogger(__name__)
 
@@ -138,19 +143,19 @@ if is_torch_available():
         def __len__(self):
             if self.mode == 'all':
                 return len(self.features)
-            elif self.mode =='half':
+            elif self.mode == 'half':
                 if self.index == 0:
                     return len(self.first_half)
-                elif self.index == 1 :
+                elif self.index == 1:
                     return len(self.second_half)
 
         def __getitem__(self, i) -> InputFeatures:
             if self.mode == 'all':
                 return self.features[i]
-            elif self.mode =='half':
+            elif self.mode == 'half':
                 if self.index == 0:
                     return self.first_half[i]
-                elif self.index == 1 :
+                elif self.index == 1:
                     return self.second_half[i]
                 else:
                     raise Exception("not supported index")
@@ -426,3 +431,29 @@ def get_labels(path: str) -> List[str]:
         return labels
     else:
         return ["O", "B-MISC", "I-MISC", "B-PER", "I-PER", "B-ORG", "I-ORG", "B-LOC", "I-LOC"]
+
+
+def align_predictions(predictions: np.ndarray, labels: np.ndarray, label_map):
+    preds = np.argmax(predictions, axis=2)
+
+    batch_size, seq_len = preds.shape
+
+    out_label_list = [[] for _ in range(batch_size)]
+    preds_list = [[] for _ in range(batch_size)]
+
+    for i in range(batch_size):
+        for j in range(seq_len):
+            if labels[i, j] != nn.CrossEntropyLoss().ignore_index:
+                out_label_list[i].append(label_map[labels[i][j]])
+                preds_list[i].append(label_map[preds[i][j]])
+
+    return preds_list, out_label_list
+
+
+def compute_metrics(p: EvalPrediction, label_map):
+    preds_list, out_label_list = align_predictions(p.predictions, p.label_ids, label_map)
+    return {
+        "precision": precision_score(out_label_list, preds_list),
+        "recall": recall_score(out_label_list, preds_list),
+        "f1": f1_score(out_label_list, preds_list),
+    }

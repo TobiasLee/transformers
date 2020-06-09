@@ -462,8 +462,8 @@ def main():
                                                                  compute_importance=True, head_mask=head_score)
     head_score = head_score_predictor(head_importance.transpose(1, 0))
     head_score = head_score.clone().detach()
-    _, head_importance, preds, labels = compute_heads_importance(args, model, eval_dataloader, compute_entropy=False,
-                                                                 compute_importance=False, head_mask=head_score)
+    # _, head_importance, preds, labels = compute_heads_importance(args, model, eval_dataloader, compute_entropy=False,
+    #                                                              compute_importance=False, head_mask=head_score)
     # evaluate masked model on the other half dev set
     test_dataset = GlueDataset(args, tokenizer=tokenizer, evaluate=True)
     test_dataset.set_mode('half')
