@@ -466,7 +466,7 @@ def main():
     eval_dataset.set_index(0)  # use first half
     if args.data_subset > 0:
         eval_dataset = Subset(eval_dataset, list(range(min(args.data_subset, len(eval_dataset)))))
-    eval_sampler = RandomSampler(eval_dataset) if args.local_rank == -1 else DistributedSampler(eval_dataset)
+    eval_sampler = SequentialSampler(eval_dataset) if args.local_rank == -1 else DistributedSampler(eval_dataset)
     eval_dataloader = DataLoader(
         eval_dataset, sampler=eval_sampler, batch_size=args.batch_size, collate_fn=DefaultDataCollator().collate_batch
     )
@@ -485,7 +485,7 @@ def main():
 
         if args.data_subset > 0:
             test_dataset = Subset(test_dataset, list(range(min(args.data_subset, len(test_dataset)))))
-        test_sampler = RandomSampler(test_dataset) if args.local_rank == -1 else DistributedSampler(eval_dataset)
+        test_sampler = SequentialSampler(test_dataset) if args.local_rank == -1 else DistributedSampler(eval_dataset)
         test_dataloader = DataLoader(
             test_dataset, sampler=test_sampler, batch_size=args.batch_size,
             collate_fn=DefaultDataCollator().collate_batch
