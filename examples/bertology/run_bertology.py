@@ -506,10 +506,16 @@ def main():
 
             f.write('remaining heads: %d\n' % head_mask.sum())
     elif args.random_masking:
-        head_mask = torch.zeros(144) # 144 head
-        inds = np.random.choice(np.arange(144), size=args.head_num)
-        head_mask[inds] = 1
+        head_mask = np.zeros(144)
+        head_mask[:args.head_num] = 1 
+        np.random.shuffle(head_mask)
+        head_mask = torch.tensor(head_mask)
+        # head_mask = torch.zeros(144) # 144 head
+        #inds = np.random.choice(np.arange(144), size=args.head_num)
+       # head_mask[inds] = 1
         head_mask = head_mask.reshape(12, 12)
+        head_mask = head_mask.to(args.device)
+        logger.info("current head mask sum: %d" % head_mask.sum())
         test_dataset = GlueDataset(args, tokenizer=tokenizer, evaluate=True)
         test_dataset.set_mode('half')
         test_dataset.set_index(1)  # use the other half
