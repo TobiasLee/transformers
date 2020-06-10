@@ -181,7 +181,7 @@ def print_2d_tensor(tensor):
 
 def compute_heads_importance(
         args, model, eval_dataloader, compute_entropy=True, compute_importance=True, head_mask=None,
-        actually_pruned=False, metric_name='f1'
+        actually_pruned=False, metric_name='f1', compute_importance_batch_variance=False
 ):
     """ This method shows how to compute:
         - head attention entropy
@@ -202,6 +202,8 @@ def compute_heads_importance(
 
     preds = None
     labels = None
+    batch_importance = None
+
     tot_tokens = 0.0
     for step, inputs in enumerate(tqdm(eval_dataloader, desc="Iteration", disable=args.local_rank not in [-1, 0])):
         for k, v in inputs.items():
@@ -225,6 +227,13 @@ def compute_heads_importance(
 
         if compute_importance:
             head_importance += head_mask.grad.abs().detach()
+
+        if compute_importance_batch_variance:
+            if batch_importance is None:
+                batch_importance = head_mask.grad.abs().detach().cpu().numpy()
+            else:
+                batch_importance = np.append(batch_importance, head_mask.grad.abs().detach().cpu().numpy())
+
         # Also store our logits/labels if we want to compute metrics afterwards
         if preds is None:
             preds = logits.detach().cpu().numpy()
@@ -247,6 +256,9 @@ def compute_heads_importance(
     if not False: # args.dont_normalize_global_importance:
         head_importance = (head_importance - head_importance.min()) / (head_importance.max() - head_importance.min())
 
+    if compute_importance_batch_variance:
+        np.save(os.path.join(args.output_dir, "head_importance_batch.npy"), batch_importance)
+        assert 1 == 0, "We broke the program directly after computing the head_importance batch"
     # Print/save matrices
     if compute_entropy:
         np.save(os.path.join(args.output_dir, "attn_entropy.npy"), attn_entropy.detach().cpu().numpy())
