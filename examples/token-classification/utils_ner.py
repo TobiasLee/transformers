@@ -15,17 +15,20 @@
 # limitations under the License.
 """ Named entity recognition fine-tuning: utilities to work with CoNLL-2003 task. """
 
-
 import logging
 import os
+
+import numpy as np
 from dataclasses import dataclass
 from enum import Enum
 from typing import List, Optional, Union
 
 from filelock import FileLock
+from sklearn.metrics import precision_score, recall_score, f1_score
 
 from transformers import PreTrainedTokenizer, is_tf_available, is_torch_available
 
+from src.transformers import EvalPrediction
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +74,7 @@ if is_torch_available():
     from torch import nn
     from torch.utils.data.dataset import Dataset
 
+
     class NerDataset(Dataset):
         """
         This will be superseded by a framework-agnostic approach
@@ -79,18 +83,19 @@ if is_torch_available():
 
         features: List[InputFeatures]
         pad_token_label_id: int = nn.CrossEntropyLoss().ignore_index
+
         # Use cross entropy ignore_index as padding label id so that only
         # real label ids contribute to the loss later.
 
         def __init__(
-            self,
-            data_dir: str,
-            tokenizer: PreTrainedTokenizer,
-            labels: List[str],
-            model_type: str,
-            max_seq_length: Optional[int] = None,
-            overwrite_cache=False,
-            mode: Split = Split.train,
+                self,
+                data_dir: str,
+                tokenizer: PreTrainedTokenizer,
+                labels: List[str],
+                model_type: str,
+                max_seq_length: Optional[int] = None,
+                overwrite_cache=False,
+                mode: Split = Split.train,
         ):
             # Load data features from cache or dataset file
             cached_features_file = os.path.join(
@@ -105,6 +110,8 @@ if is_torch_available():
                 if os.path.exists(cached_features_file) and not overwrite_cache:
                     logger.info(f"Loading features from cached file {cached_features_file}")
                     self.features = torch.load(cached_features_file)
+                    self.first_half = self.features[:len(self.features) // 2]
+                    self.second_half = self.features[len(self.features) // 2:]
                 else:
                     logger.info(f"Creating features from dataset file at {data_dir}")
                     examples = read_examples_from_file(data_dir, mode)
@@ -126,18 +133,45 @@ if is_torch_available():
                         pad_token_segment_id=tokenizer.pad_token_type_id,
                         pad_token_label_id=self.pad_token_label_id,
                     )
+                    self.first_half = self.features[:len(self.features) // 2]
+                    self.second_half = self.features[len(self.features) // 2:]
                     logger.info(f"Saving features into cached file {cached_features_file}")
                     torch.save(self.features, cached_features_file)
+            self.mode = 'all'
+            self.cur_index = 1
 
         def __len__(self):
-            return len(self.features)
+            if self.mode == 'all':
+                return len(self.features)
+            elif self.mode == 'half':
+                if self.index == 0:
+                    return len(self.first_half)
+                elif self.index == 1:
+                    return len(self.second_half)
 
         def __getitem__(self, i) -> InputFeatures:
-            return self.features[i]
+            if self.mode == 'all':
+                return self.features[i]
+            elif self.mode == 'half':
+                if self.index == 0:
+                    return self.first_half[i]
+                elif self.index == 1:
+                    return self.second_half[i]
+                else:
+                    raise Exception("not supported index")
+            else:
+                raise Exception("Not Supported Mode")
 
+        def set_mode(self, mode):
+            assert mode in ['all', 'half'], 'model must be all or half'
+            self.mode = mode
+
+        def set_index(self, index):
+            self.index = index
 
 if is_tf_available():
     import tensorflow as tf
+
 
     class TFNerDataset:
         """
@@ -147,18 +181,19 @@ if is_tf_available():
 
         features: List[InputFeatures]
         pad_token_label_id: int = -1
+
         # Use cross entropy ignore_index as padding label id so that only
         # real label ids contribute to the loss later.
 
         def __init__(
-            self,
-            data_dir: str,
-            tokenizer: PreTrainedTokenizer,
-            labels: List[str],
-            model_type: str,
-            max_seq_length: Optional[int] = None,
-            overwrite_cache=False,
-            mode: Split = Split.train,
+                self,
+                data_dir: str,
+                tokenizer: PreTrainedTokenizer,
+                labels: List[str],
+                model_type: str,
+                max_seq_length: Optional[int] = None,
+                overwrite_cache=False,
+                mode: Split = Split.train,
         ):
             examples = read_examples_from_file(data_dir, mode)
             # TODO clean up all this to leverage built-in features of tokenizers
@@ -260,21 +295,21 @@ def read_examples_from_file(data_dir, mode: Union[Split, str]) -> List[InputExam
 
 
 def convert_examples_to_features(
-    examples: List[InputExample],
-    label_list: List[str],
-    max_seq_length: int,
-    tokenizer: PreTrainedTokenizer,
-    cls_token_at_end=False,
-    cls_token="[CLS]",
-    cls_token_segment_id=1,
-    sep_token="[SEP]",
-    sep_token_extra=False,
-    pad_on_left=False,
-    pad_token=0,
-    pad_token_segment_id=0,
-    pad_token_label_id=-100,
-    sequence_a_segment_id=0,
-    mask_padding_with_zero=True,
+        examples: List[InputExample],
+        label_list: List[str],
+        max_seq_length: int,
+        tokenizer: PreTrainedTokenizer,
+        cls_token_at_end=False,
+        cls_token="[CLS]",
+        cls_token_segment_id=1,
+        sep_token="[SEP]",
+        sep_token_extra=False,
+        pad_on_left=False,
+        pad_token=0,
+        pad_token_segment_id=0,
+        pad_token_label_id=-100,
+        sequence_a_segment_id=0,
+        mask_padding_with_zero=True,
 ) -> List[InputFeatures]:
     """ Loads a data file into a list of `InputFeatures`
         `cls_token_at_end` define the location of the CLS token:
@@ -396,3 +431,29 @@ def get_labels(path: str) -> List[str]:
         return labels
     else:
         return ["O", "B-MISC", "I-MISC", "B-PER", "I-PER", "B-ORG", "I-ORG", "B-LOC", "I-LOC"]
+
+
+def align_predictions(predictions: np.ndarray, labels: np.ndarray, label_map):
+    preds = np.argmax(predictions, axis=2)
+
+    batch_size, seq_len = preds.shape
+
+    out_label_list = [[] for _ in range(batch_size)]
+    preds_list = [[] for _ in range(batch_size)]
+
+    for i in range(batch_size):
+        for j in range(seq_len):
+            if labels[i, j] != nn.CrossEntropyLoss().ignore_index:
+                out_label_list[i].append(label_map[labels[i][j]])
+                preds_list[i].append(label_map[preds[i][j]])
+
+    return preds_list, out_label_list
+
+
+def compute_metrics(p: EvalPrediction, label_map):
+    preds_list, out_label_list = align_predictions(p.predictions, p.label_ids, label_map)
+    return {
+        "precision": precision_score(out_label_list, preds_list),
+        "recall": recall_score(out_label_list, preds_list),
+        "f1": f1_score(out_label_list, preds_list),
+    }

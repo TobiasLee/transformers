@@ -22,7 +22,7 @@ from zipfile import ZipFile, is_zipfile
 
 import requests
 from filelock import FileLock
-import tqdm
+from tqdm import tqdm
 
 from . import __version__
 
@@ -58,6 +58,7 @@ try:
         _tf_available = False
 except (ImportError, AssertionError):
     _tf_available = False  # pylint: disable=invalid-name
+
 
 try:
     from torch.hub import _get_torch_home
