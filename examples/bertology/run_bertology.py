@@ -358,6 +358,10 @@ def main():
     parser.add_argument(
         "--try_masking", action="store_true", help="Whether to try to mask head until a threshold of accuracy."
     )
+
+    parser.add_argument(
+        "--random_masking", action="store_true", help="Using random generated mask"
+    )
     parser.add_argument(
         "--masking_threshold",
         default=0.9,
