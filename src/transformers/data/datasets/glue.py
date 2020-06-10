@@ -2,8 +2,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import List, Optional, Union
+from typing import List, Optional
 
 import torch
 from filelock import FileLock
@@ -47,12 +46,6 @@ class GlueDataTrainingArguments:
         self.task_name = self.task_name.lower()
 
 
-class Split(Enum):
-    train = "train"
-    dev = "dev"
-    test = "test"
-
-
 class GlueDataset(Dataset):
     """
     This will be superseded by a framework-agnostic approach
@@ -69,32 +62,17 @@ class GlueDataset(Dataset):
             tokenizer: PreTrainedTokenizer,
             limit_length: Optional[int] = None,
             evaluate=False,
-
     ):
         self.args = args
-        self.processor = glue_processors[args.task_name]()
+        processor = glue_processors[args.task_name]()
         self.output_mode = glue_output_modes[args.task_name]
-        if isinstance(mode, str):
-            try:
-                mode = Split[mode]
-            except KeyError:
-                raise KeyError("mode is not a valid split name")
         # Load data features from cache or dataset file
         cached_features_file = os.path.join(
-            cache_dir if cache_dir is not None else args.data_dir,
+            args.data_dir,
             "cached_{}_{}_{}_{}".format(
-                mode.value, tokenizer.__class__.__name__, str(args.max_seq_length), args.task_name,
+                "dev" if evaluate else "train", tokenizer.__class__.__name__, str(args.max_seq_length), args.task_name,
             ),
         )
-        label_list = self.processor.get_labels()
-        if args.task_name in ["mnli", "mnli-mm"] and tokenizer.__class__ in (
-            RobertaTokenizer,
-            RobertaTokenizerFast,
-            XLMRobertaTokenizer,
-        ):
-            # HACK(label indices are swapped in RoBERTa pretrained model)
-            label_list[1], label_list[2] = label_list[2], label_list[1]
-        self.label_list = label_list
 
         # Make sure only the first process in distributed training processes the dataset,
         # and the others will use the cache.
@@ -124,7 +102,6 @@ class GlueDataset(Dataset):
                     if evaluate
                     else processor.get_train_examples(args.data_dir)
                 )
-
                 if limit_length is not None:
                     examples = examples[:limit_length]
                 self.features = glue_convert_examples_to_features(
@@ -170,4 +147,3 @@ class GlueDataset(Dataset):
 
     def set_index(self, index):
         self.current_idx = index
-
