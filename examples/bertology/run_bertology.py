@@ -358,6 +358,10 @@ def main():
     parser.add_argument(
         "--try_masking", action="store_true", help="Whether to try to mask head until a threshold of accuracy."
     )
+
+    parser.add_argument(
+        "--random_masking", action="store_true", help="Using random generated mask"
+    )
     parser.add_argument(
         "--masking_threshold",
         default=0.9,
@@ -501,6 +505,33 @@ def main():
                 f.write("%s = %s\n" % (key, value))
 
             f.write('remaining heads: %d\n' % head_mask.sum())
+    elif args.random_masking:
+        head_mask = torch.zeros(144) # 144 head
+        inds = np.random.choice(np.arange(144), size=args.head_num)
+        head_mask[inds] = 1
+        head_mask = head_mask.reshape(12, 12)
+        test_dataset = GlueDataset(args, tokenizer=tokenizer, evaluate=True)
+        test_dataset.set_mode('half')
+        test_dataset.set_index(1)  # use the other half
+
+        if args.data_subset > 0:
+            test_dataset = Subset(test_dataset, list(range(min(args.data_subset, len(test_dataset)))))
+        test_sampler = RandomSampler(test_dataset) if args.local_rank == -1 else DistributedSampler(eval_dataset)
+        test_dataloader = DataLoader(
+            test_dataset, sampler=test_sampler, batch_size=args.batch_size,
+            collate_fn=DefaultDataCollator().collate_batch
+        )
+
+        preds, labels = evaluate_masked_model(args, model, test_dataloader, head_mask)
+        preds = np.argmax(preds, axis=1) if args.output_mode == "classification" else np.squeeze(preds)
+        final_score_dict = glue_compute_metrics(args.task_name, preds, labels)
+        with open(os.path.join(args.output_dir, 'random_mask_result.txt'), 'w') as f:
+            logger.info("***** Eval results {} *****".format(eval_dataset.args.task_name))
+            for key, value in final_score_dict.items():
+                logger.info("  %s = %s", key, value)
+                f.write("%s = %s\n" % (key, value))
+            f.write('remaining heads: %d\n' % head_mask.sum())
+
 
 
 if __name__ == "__main__":

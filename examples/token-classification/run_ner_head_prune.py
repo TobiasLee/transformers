@@ -97,6 +97,11 @@ class DataTrainingArguments:
     try_masking: bool = field(
         default=False, metadata={"help": " try to do mask evalute pruned model"}
     )
+
+    random_masking: bool = field(
+        default=False, metadata={"help": "Random masking evaluate pruned model"}
+    )
+
     masking_threshold: float = field(
         default=0.5, metadata={'help': "threshold for masking heads"}
     )
@@ -181,7 +186,7 @@ def print_2d_tensor(tensor):
 
 def compute_heads_importance(
         args, model, eval_dataloader, compute_entropy=True, compute_importance=True, head_mask=None,
-        actually_pruned=False, metric_name='f1'
+        actually_pruned=False, metric_name='f1', compute_importance_batch_variance=False
 ):
     """ This method shows how to compute:
         - head attention entropy
@@ -202,6 +207,8 @@ def compute_heads_importance(
 
     preds = None
     labels = None
+    batch_importance = None
+
     tot_tokens = 0.0
     for step, inputs in enumerate(tqdm(eval_dataloader, desc="Iteration", disable=args.local_rank not in [-1, 0])):
         for k, v in inputs.items():
@@ -225,6 +232,13 @@ def compute_heads_importance(
 
         if compute_importance:
             head_importance += head_mask.grad.abs().detach()
+
+        if compute_importance_batch_variance:
+            if batch_importance is None:
+                batch_importance = head_mask.grad.abs().detach().cpu().numpy()
+            else:
+                batch_importance = np.append(batch_importance, head_mask.grad.abs().detach().cpu().numpy())
+
         # Also store our logits/labels if we want to compute metrics afterwards
         if preds is None:
             preds = logits.detach().cpu().numpy()
@@ -239,14 +253,17 @@ def compute_heads_importance(
     attn_entropy /= tot_tokens
     head_importance /= tot_tokens
     # Layerwise importance normalization
-    if not False: #args.dont_normalize_importance_by_layer:
+    if not False:  # args.dont_normalize_importance_by_layer:
         exponent = 2
         norm_by_layer = torch.pow(torch.pow(head_importance, exponent).sum(-1), 1 / exponent)
         head_importance /= norm_by_layer.unsqueeze(-1) + 1e-20
 
-    if not False: # args.dont_normalize_global_importance:
+    if not False:  # args.dont_normalize_global_importance:
         head_importance = (head_importance - head_importance.min()) / (head_importance.max() - head_importance.min())
 
+    if compute_importance_batch_variance:
+        np.save(os.path.join(args.output_dir, "head_importance_batch.npy"), batch_importance)
+        assert 1 == 0, "We broke the program directly after computing the head_importance batch"
     # Print/save matrices
     if compute_entropy:
         np.save(os.path.join(args.output_dir, "attn_entropy.npy"), attn_entropy.detach().cpu().numpy())
@@ -273,8 +290,8 @@ def mask_heads(args, model, eval_dataloader, metric_name='f1', head_num=144, per
         based on the head importance scores, as described in Michel et al. (http://arxiv.org/abs/1905.10650)
     """
     _, head_importance, preds, labels = compute_heads_importance(args, model, eval_dataloader, compute_entropy=False)
-    original_score =  compute_metrics(EvalPrediction(preds, labels), label_map)[metric_name]
-    logger.info("Pruning: original score: %f, target left head num: %d", original_score, head_num )
+    original_score = compute_metrics(EvalPrediction(preds, labels), label_map)[metric_name]
+    logger.info("Pruning: original score: %f, target left head num: %d", original_score, head_num)
 
     new_head_mask = torch.ones_like(head_importance)
     num_to_mask = per_iter_mask  # max(1, int(new_head_mask.numel() * args.masking_amount))
@@ -302,7 +319,7 @@ def mask_heads(args, model, eval_dataloader, metric_name='f1', head_num=144, per
         )
         # preds = np.argmax(preds, axis=1) if args.output_mode == "classification" else np.squeeze(preds)
         # current_score = glue_compute_metrics(args.task_name, preds, labels)[args.metric_name]
-        current_score =  compute_metrics(EvalPrediction(preds, labels), label_map)[metric_name]
+        current_score = compute_metrics(EvalPrediction(preds, labels), label_map)[metric_name]
         logger.info(
             "Masking: current score: %f, remaining heads %d (%.1f percents)",
             current_score,
@@ -328,7 +345,7 @@ def prune_heads(args, model, eval_dataloader, head_mask, metric_name='f1', label
     )
     # preds = np.argmax(preds, axis=1) if args.output_mode == "classification" else np.squeeze(preds)
     # score_masking = glue_compute_metrics(args.task_name, preds, labels)[args.metric_name]
-    score_masking =  compute_metrics(EvalPrediction(predictions=preds, labels=labels, label_map=label_map))[metric_name]
+    score_masking = compute_metrics(EvalPrediction(predictions=preds, labels=labels, label_map=label_map))[metric_name]
     original_time = datetime.now() - before_time
 
     original_num_params = sum(p.numel() for p in model.parameters())
@@ -353,7 +370,7 @@ def prune_heads(args, model, eval_dataloader, head_mask, metric_name='f1', label
     )
     # preds = np.argmax(preds, axis=1) if args.output_mode == "classification" else np.squeeze(preds)
     # score_pruning = glue_compute_metrics(args.task_name, preds, labels)[args.metric_name]
-    score_pruning =compute_metrics(EvalPrediction(preds, labels), label_map)[metric_name]
+    score_pruning = compute_metrics(EvalPrediction(preds, labels), label_map)[metric_name]
 
     new_time = datetime.now() - before_time
 
@@ -500,15 +517,48 @@ def main():
         preds, labels = evaluate_masked_model(training_args, model, test_dataloader, head_mask)
         final_score_dict = compute_metrics(EvalPrediction(preds, labels), label_map)
         with open(os.path.join(training_args.output_dir, 'mask_result.txt'), 'w') as f:
-            logger.info("***** Eval results *****" )
+            logger.info("***** Eval results *****")
+            for key, value in final_score_dict.items():
+                logger.info("  %s = %s", key, value)
+                f.write("%s = %s\n" % (key, value))
+
+            f.write('remaining heads: %d\n' % head_mask.sum())
+    elif data_args.random_masking:
+        head_mask = torch.zeros(144)  # 144 head
+        inds = np.random.choice(np.arange(144), size=args.head_num)
+        head_mask[inds] = 1
+        head_mask = head_mask.reshape(12, 12)
+
+        test_dataset = NerDataset(
+            data_dir=data_args.data_dir,
+            tokenizer=tokenizer,
+            labels=labels,
+            model_type=config.model_type,
+            max_seq_length=data_args.max_seq_length,
+            overwrite_cache=data_args.overwrite_cache,
+            mode=Split.dev,
+        )
+        test_dataset.set_mode('half')
+        test_dataset.set_index(1)  # use the other half
+
+        test_sampler = RandomSampler(test_dataset) if training_args.local_rank == -1 else DistributedSampler(
+            eval_dataset)
+        test_dataloader = DataLoader(
+            test_dataset, sampler=test_sampler, batch_size=training_args.train_batch_size,
+            collate_fn=DefaultDataCollator().collate_batch
+        )
+
+        preds, labels = evaluate_masked_model(training_args, model, test_dataloader, head_mask)
+        final_score_dict = compute_metrics(EvalPrediction(preds, labels), label_map)
+        with open(os.path.join(training_args.output_dir, 'random_mask_result.txt'), 'w') as f:
+            logger.info("***** Eval results *****")
             for key, value in final_score_dict.items():
                 logger.info("  %s = %s", key, value)
                 f.write("%s = %s\n" % (key, value))
 
             f.write('remaining heads: %d\n' % head_mask.sum())
 
-    results = None
-    return results
+    return final_score_dict
 
 
 def _mp_fn(index):
