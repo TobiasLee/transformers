@@ -111,7 +111,7 @@ class GlueDataset(Dataset):
                     label_list=label_list,
                     output_mode=self.output_mode,
                 )
-                logger.infor("creating half features")
+                logger.info("creating half features")
                 self.features_for_head_pruning = self.features[: len(self.features) // 2]
                 self.features_for_dev = self.features[len(self.features) // 2:]
                 start = time.time()
