@@ -24,7 +24,7 @@ from enum import Enum
 from typing import List, Optional, Union
 
 from filelock import FileLock
-from sklearn.metrics import precision_score, recall_score, f1_score
+from seqeval.metrics import precision_score, recall_score, f1_score
 
 from transformers import PreTrainedTokenizer, is_tf_available, is_torch_available
 

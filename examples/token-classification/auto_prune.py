@@ -421,7 +421,6 @@ def main():
     labels = get_labels(data_args.labels)
     label_map: Dict[int, str] = {i: label for i, label in enumerate(labels)}
     num_labels = len(labels)
-
     # Load pretrained model and tokenizer
     #
     # Distributed training:
@@ -493,7 +492,8 @@ def main():
         head_score = search_optimal_heads(training_args, model, head_score_predictor, optimizer, l1_loss,
                                           eval_dataloader,
                                           head_score, metric_name=data_args.metric_name,
-                                          sparse_ratio=data_args.sparse_ratio)
+                                          sparse_ratio=data_args.sparse_ratio,
+                                          label_map=label_map)
 
     # compute corpus level head-importance for final head score prediction
     head_score = head_score.clone().detach()
