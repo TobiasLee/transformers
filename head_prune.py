@@ -111,7 +111,7 @@ def print_2d_tensor(tensor):
 
 def compute_heads_importance(
         args, model, eval_dataloader, compute_entropy=True, compute_importance=True, head_mask=None,
-        actually_pruned=False
+        actually_pruned=False, compute_mlp_importance=False, mlp_mask=None,
 ):
     """ This method shows how to compute:
         - head attention entropy
@@ -121,11 +121,15 @@ def compute_heads_importance(
     n_layers, n_heads = model.config.num_hidden_layers, model.config.num_attention_heads
     head_importance = torch.zeros(n_layers, n_heads).to(args.device)
     attn_entropy = torch.zeros(n_layers, n_heads).to(args.device)
+    mlp_importance = torch.zeros(n_layers).to(args.device)
 
     if head_mask is None:
         head_mask = torch.ones(n_layers, n_heads).to(args.device)
-
+    if mlp_mask is None:
+        mlp_mask = torch.nones(n_layers).to(args.device
+                                            )
     head_mask.requires_grad_(requires_grad=True)
+    mlp_mask.requires_grad_(requires_grad=True)
     # If actually pruned attention multi-head, set head mask to None to avoid shape mismatch
     if actually_pruned:
         head_mask = None
@@ -139,7 +143,7 @@ def compute_heads_importance(
             # logger.info(k)
 
         # Do a forward pass (not with torch.no_grad() since we need gradients for importance score - see below)
-        outputs = model(**inputs, head_mask=head_mask)
+        outputs = model(**inputs, head_mask=head_mask, mlp_mask=mlp_mask)
         loss, logits, all_attentions = (
             outputs[0],
             outputs[1],
@@ -155,6 +159,8 @@ def compute_heads_importance(
 
         if compute_importance:
             head_importance += head_mask.grad.abs().detach()
+        if compute_mlp_importance:
+            mlp_importance += mlp_mask.grad.abs().detach()
 
         # Also store our logits/labels if we want to compute metrics afterwards
         if preds is None:
@@ -188,11 +194,14 @@ def compute_heads_importance(
     # print_2d_tensor(attn_entropy)
     logger.info("Head importance scores")
     print_2d_tensor(head_importance)
+    logger.infor("MLP importance scores")
+    print_2d_tensor(mlp_importance)
     logger.info("Head ranked by importance scores")
     head_ranks = torch.zeros(head_importance.numel(), dtype=torch.long, device=args.device)
     head_ranks[head_importance.view(-1).sort(descending=True)[1]] = torch.arange(
         head_importance.numel(), device=args.device
     )
+
     head_ranks = head_ranks.view_as(head_importance)
     print_2d_tensor(head_ranks)
 
