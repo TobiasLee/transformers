@@ -1131,6 +1131,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
         head_mask=None,
         inputs_embeds=None,
         labels=None,
+        mlp_mask=None
     ):
         r"""
         labels (:obj:`torch.LongTensor` of shape :obj:`(batch_size,)`, `optional`, defaults to :obj:`None`):
@@ -1180,6 +1181,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
             position_ids=position_ids,
             head_mask=head_mask,
             inputs_embeds=inputs_embeds,
+            mlp_mask=mlp_mask
         )
 
         pooled_output = outputs[1]
