@@ -126,7 +126,7 @@ def compute_heads_importance(
     if head_mask is None:
         head_mask = torch.ones(n_layers, n_heads).to(args.device)
     if mlp_mask is None:
-        mlp_mask = torch.nones(n_layers).to(args.device
+        mlp_mask = torch.ones(n_layers).to(args.device
                                             )
     head_mask.requires_grad_(requires_grad=True)
     mlp_mask.requires_grad_(requires_grad=True)
@@ -194,8 +194,8 @@ def compute_heads_importance(
     # print_2d_tensor(attn_entropy)
     logger.info("Head importance scores")
     print_2d_tensor(head_importance)
-    logger.infor("MLP importance scores")
-    print_2d_tensor(mlp_importance)
+    logger.info("MLP importance scores")
+    print(mlp_importance)
     logger.info("Head ranked by importance scores")
     head_ranks = torch.zeros(head_importance.numel(), dtype=torch.long, device=args.device)
     head_ranks[head_importance.view(-1).sort(descending=True)[1]] = torch.arange(
