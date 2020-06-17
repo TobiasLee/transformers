@@ -45,6 +45,31 @@ from transformers import (
 
 logger = logging.getLogger(__name__)
 
+class HardConcretePredictor(nn.Module):
+    def __init__(self, args, shape=(12, 12), temperature=0.33, stretch_limits=(-0.1, 1.1), eps=1e-6, hard=False):
+        super(HardConcretePredictor, self).__init__()
+        self.temperature, self.stretch_limits, self.eps = temperature, stretch_limits, eps
+        self.log_a = nn.Parameter(torch.ones(shape))
+        self.hard = hard
+        self.shape = shape
+        self.args = args 
+        #print(self.log_a)
+
+    def forward(self, head_importance):
+        low, high = self.stretch_limits
+
+        if self.training:
+            noise = torch.ones(self.shape).uniform_(self.eps, 1 - self.eps).to(self.args.device)
+            concrete = torch.sigmoid((torch.log(noise) - torch.log(1 - noise) + self.log_a) / self.temperature)
+        else:
+            concrete = torch.sigmoid(self.log_a)
+        stretched_concrete = concrete * (high - low) + low
+        clipped_concrete = torch.clamp(stretched_concrete, min=0, max=1)
+        if self.hard:
+            hard_concrete = torch.gt(clipped_concrete, 0.5).float().to(self.args.device)
+            clipped_concrete = clipped_concrete + (hard_concrete - clipped_concrete).clone().detach()
+        return clipped_concrete
+
 
 class MLPPredictor(nn.Module):
     def __init__(self, head_num=12, layer_num=12, hidden_size=128):
@@ -126,8 +151,8 @@ def compute_heads_importance(
     if head_mask is None:
         head_mask = torch.ones(n_layers, n_heads).to(args.device)
     if mlp_mask is None:
-        mlp_mask = torch.ones(n_layers).to(args.device
-                                            )
+        mlp_mask = torch.ones(n_layers).to(args.device)
+    
     head_mask.requires_grad_(requires_grad=True)
     mlp_mask.requires_grad_(requires_grad=True)
     # If actually pruned attention multi-head, set head mask to None to avoid shape mismatch
@@ -362,6 +387,7 @@ def main():
     parser.add_argument("--batch_size", default=1, type=int, help="Batch size.")
 
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--predictor", type=str, default="mlp", help="Predictor type, mlp and hc")
 
     parser.add_argument("--predictor_lr", type=float, default=1e-3)
     parser.add_argument("--epoch_num", type=int, default=20)
@@ -455,7 +481,13 @@ def main():
     )
 
     # head_score_predictor = RNNHeadPredictor(12, 12, 128, rnn_layers=2)
-    head_score_predictor = MLPPredictor(12, 12, 128)  # bsz can be important ?
+    if args.predictor == 'mlp':
+        head_score_predictor = MLPPredictor(12, 12, 128)  # bsz can be important ?
+    elif args.predictor == 'hc':
+        head_score_predictor = HardConcretePredictor(args, shape=(12, 12))
+    else:
+        raise Exception("Not supported head score predictor")
+
     optimizer = torch.optim.Adam(head_score_predictor.parameters(), lr=args.predictor_lr)
     head_score_predictor.to(args.device)
     l1_loss = SparseLoss()
