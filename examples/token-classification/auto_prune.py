@@ -41,7 +41,7 @@ from transformers import (
 )
 from utils_ner import NerDataset, Split, get_labels, align_predictions, compute_metrics
 from src.transformers import DefaultDataCollator
-from head_score_predictor import MLPPredictor, SparseLoss
+from head_score_predictor import MLPPredictor, SparseLoss, HardConcretePredictor
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +90,10 @@ class DataTrainingArguments:
     )
     overwrite_cache: bool = field(
         default=False, metadata={"help": "Overwrite the cached training and evaluation sets"}
+    )
+
+    predictor : str = field(
+        default='mlp', metadata={"help": "predictor type"}
     )
 
     metric_name: str = field(
@@ -479,7 +483,13 @@ def main():
     )
 
     # head_score_predictor = RNNHeadPredictor(12, 12, 128, rnn_layers=2)
-    head_score_predictor = MLPPredictor(12, 12, 128)  # bsz can be important ?
+    # head_score_predictor = MLPPredictor(12, 12, 128)  # bsz can be important ?
+    if data_args.predictor == 'mlp':
+        head_score_predictor = MLPPredictor(12, 12, 128)  # bsz can be important ?
+    elif data_args.predictor == 'hc':
+        head_score_predictor = HardConcretePredictor(training_args, shape=(12, 12))
+    else:
+        raise Exception("Not supported head score predictor")
     optimizer = torch.optim.Adam(head_score_predictor.parameters(), lr=data_args.predictor_lr)
     head_score_predictor.to(training_args.device)
     l1_loss = SparseLoss()
@@ -502,6 +512,7 @@ def main():
                                                                  compute_importance=True, head_mask=head_score,
                                                                  metric_name=data_args.metric_name)
     # head score for evaluation
+    head_score_predictor.eval() 
     head_score = head_score_predictor(head_importance.transpose(1, 0))
     head_score = head_score.clone().detach()
 
