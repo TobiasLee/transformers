@@ -501,6 +501,7 @@ def main():
     head_score = head_score.clone().detach()
     _, head_importance, preds, labels = compute_heads_importance(args, model, eval_dataloader, compute_entropy=False,
                                                                  compute_importance=True, head_mask=head_score)
+    head_score_predictor.eval()
     head_score = head_score_predictor(head_importance.transpose(1, 0))
     head_score = head_score.clone().detach()
     # _, head_importance, preds, labels = compute_heads_importance(args, model, eval_dataloader, compute_entropy=False,
