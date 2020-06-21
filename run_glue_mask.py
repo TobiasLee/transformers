@@ -22,7 +22,7 @@ import os
 import sys
 from dataclasses import dataclass, field
 from typing import Dict, Optional
-
+import torch 
 import numpy as np
 
 from transformers import AutoConfig, AutoModelForSequenceClassification, AutoTokenizer, EvalPrediction, GlueDataset
@@ -138,7 +138,7 @@ def main():
     )
 
     if model_args.mask_file:
-        head_mask = np.load(model_args.mask_file)
+        head_mask = torch.tensor(np.load(model_args.mask_file))
     else:
         head_mask = None
     # Get datasets
