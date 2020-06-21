@@ -253,8 +253,8 @@ class BertSelfAttention(nn.Module):
         context_layer = torch.matmul(attention_probs, value_layer)
 
         context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
-        head_norm = torch.mean(torch.norm(context_layer, dim=-1), dim=(0, 1))  # head_num
-        print(head_norm)
+        #head_norm = torch.mean(torch.norm(context_layer, dim=-1), dim=(0, 1))  # head_num
+        #print(head_norm)
 
         new_context_layer_shape = context_layer.size()[:-2] + (self.all_head_size,)
         context_layer = context_layer.view(*new_context_layer_shape)
@@ -349,7 +349,10 @@ class BertOutput(nn.Module):
         if mlp_mask is not None:
             hidden_states = self.dense(hidden_states)
             hidden_states = self.dropout(hidden_states)
-            hidden_states = self.LayerNorm(mlp_mask * hidden_states + input_tensor)  # muliply_mlp mask
+            #print(mlp_mask)
+            mlp_mask = torch.ones_like(hidden_states) * mlp_mask
+            hidden_states = mlp_mask * hidden_states
+            hidden_states = self.LayerNorm(hidden_states + input_tensor)  # multiply_mlp mask
         else:
             hidden_states = self.dense(hidden_states)
             hidden_states = self.dropout(hidden_states)
@@ -415,7 +418,7 @@ class BertEncoder(nn.Module):
         all_hidden_states = ()
         all_attentions = ()
         for i, layer_module in enumerate(self.layer):
-            print(i)
+            # print(i)
             if self.output_hidden_states:
                 all_hidden_states = all_hidden_states + (hidden_states,)
 

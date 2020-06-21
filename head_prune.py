@@ -46,26 +46,27 @@ from transformers import (
 logger = logging.getLogger(__name__)
 
 class HardConcretePredictor(nn.Module):
-    def __init__(self, shape=(12, 12), temperature=0.33, stretch_limits=(-0.1, 1.1), eps=1e-6, hard=False):
+    def __init__(self, args, shape=(12, 12), temperature=0.33, stretch_limits=(-0.1, 1.1), eps=1e-6, hard=False):
         super(HardConcretePredictor, self).__init__()
         self.temperature, self.stretch_limits, self.eps = temperature, stretch_limits, eps
         self.log_a = nn.Parameter(torch.ones(shape))
         self.hard = hard
         self.shape = shape
-        print(self.log_a)
+        self.args = args 
+        #print(self.log_a)
 
     def forward(self, head_importance):
         low, high = self.stretch_limits
 
         if self.training:
-            noise = torch.ones(self.shape).uniform_(self.eps, 1 - self.eps)
+            noise = torch.ones(self.shape).uniform_(self.eps, 1 - self.eps).to(self.args.device)
             concrete = torch.sigmoid((torch.log(noise) - torch.log(1 - noise) + self.log_a) / self.temperature)
         else:
             concrete = torch.sigmoid(self.log_a)
         stretched_concrete = concrete * (high - low) + low
         clipped_concrete = torch.clamp(stretched_concrete, min=0, max=1)
         if self.hard:
-            hard_concrete = torch.gt(clipped_concrete, 0.5).float()
+            hard_concrete = torch.gt(clipped_concrete, 0.5).float().to(self.args.device)
             clipped_concrete = clipped_concrete + (hard_concrete - clipped_concrete).clone().detach()
         return clipped_concrete
 
@@ -151,7 +152,7 @@ def compute_heads_importance(
         head_mask = torch.ones(n_layers, n_heads).to(args.device)
     if mlp_mask is None:
         mlp_mask = torch.ones(n_layers).to(args.device)
-
+    
     head_mask.requires_grad_(requires_grad=True)
     mlp_mask.requires_grad_(requires_grad=True)
     # If actually pruned attention multi-head, set head mask to None to avoid shape mismatch
@@ -218,8 +219,8 @@ def compute_heads_importance(
     # print_2d_tensor(attn_entropy)
     logger.info("Head importance scores")
     print_2d_tensor(head_importance)
-    logger.infor("MLP importance scores")
-    print_2d_tensor(mlp_importance)
+    logger.info("MLP importance scores")
+    print(mlp_importance)
     logger.info("Head ranked by importance scores")
     head_ranks = torch.zeros(head_importance.numel(), dtype=torch.long, device=args.device)
     head_ranks[head_importance.view(-1).sort(descending=True)[1]] = torch.arange(
@@ -483,7 +484,7 @@ def main():
     if args.predictor == 'mlp':
         head_score_predictor = MLPPredictor(12, 12, 128)  # bsz can be important ?
     elif args.predictor == 'hc':
-        head_score_predictor = HardConcretePredictor(shape=(12, 12))
+        head_score_predictor = HardConcretePredictor(args, shape=(12, 12))
     else:
         raise Exception("Not supported head score predictor")
 

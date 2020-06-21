@@ -1,6 +1,31 @@
 import torch
 import torch.nn as nn
 
+class HardConcretePredictor(nn.Module):
+    def __init__(self, args, shape=(12, 12), temperature=0.33, stretch_limits=(-0.1, 1.1), eps=1e-6, hard=False):
+        super(HardConcretePredictor, self).__init__()
+        self.temperature, self.stretch_limits, self.eps = temperature, stretch_limits, eps
+        self.log_a = nn.Parameter(torch.ones(shape))
+        self.hard = hard
+        self.shape = shape
+        self.args = args 
+        #print(self.log_a)
+
+    def forward(self, head_importance):
+        low, high = self.stretch_limits
+
+        if self.training:
+            noise = torch.ones(self.shape).uniform_(self.eps, 1 - self.eps).to(self.args.device)
+            concrete = torch.sigmoid((torch.log(noise) - torch.log(1 - noise) + self.log_a) / self.temperature)
+        else:
+            concrete = torch.sigmoid(self.log_a)
+        stretched_concrete = concrete * (high - low) + low
+        clipped_concrete = torch.clamp(stretched_concrete, min=0, max=1)
+        if self.hard:
+            hard_concrete = torch.gt(clipped_concrete, 0.5).float().to(self.args.device)
+            clipped_concrete = clipped_concrete + (hard_concrete - clipped_concrete).clone().detach()
+        return clipped_concrete
+
 
 class SparseLoss(nn.Module):
     def __init__(self):
