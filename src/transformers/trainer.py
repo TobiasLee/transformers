@@ -710,7 +710,7 @@ class Trainer:
 
         return output.metrics
 
-    def predict(self, test_dataset: Dataset) -> PredictionOutput:
+    def predict(self, test_dataset: Dataset, head_mask=None) -> PredictionOutput:
         """
         Run prediction and return predictions and potential metrics.
 
@@ -719,7 +719,7 @@ class Trainer:
         """
         test_dataloader = self.get_test_dataloader(test_dataset)
 
-        return self._prediction_loop(test_dataloader, description="Prediction")
+        return self._prediction_loop(test_dataloader, description="Prediction", head_mask=head_mask)
 
     def _prediction_loop(
         self, dataloader: DataLoader, description: str, prediction_loss_only: Optional[bool] = None, head_mask=None
