@@ -197,6 +197,31 @@ def main():
                     writer.write("%s = %s\n" % (key, value))
 
             results.update(result)
+    if training_args.do_predict and training_args.local_rank in [-1, 0]:
+        logger.info("*** Prediction ***")
+
+        # Loop to handle MNLI double evaluation (matched, mis-matched)
+        eval_datasets = [eval_dataset]
+        if data_args.task_name == "mnli":
+            mnli_mm_data_args = dataclasses.replace(data_args, task_name="mnli-mm")
+            eval_datasets.append(GlueDataset(mnli_mm_data_args, tokenizer=tokenizer, evaluate=True))
+
+        for eval_dataset in eval_datasets:
+            result = trainer.predict(eval_dataset=eval_dataset, head_mask=head_mask)
+            predictions = result.predictions
+            labels = result.label_ids
+
+            output_test_file = os.path.join(
+                training_args.output_dir, f"predict_results_{eval_dataset.args.task_name}.txt"
+            )
+            with open(output_test_file, "w") as writer:
+                logger.info("***** Prediction results {} *****".format(eval_dataset.args.task_name))
+                for label, item in zip(labels, predictions):
+                    if output_mode == "regression":
+                        writer.write("%d\t%3.3f\n" % (label, item))
+                    else:
+                        item = "\t".join(item.tolist())
+                        writer.write("%d\t%s\n" % (label, item))
 
     return results
 
