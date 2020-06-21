@@ -700,7 +700,7 @@ class Trainer:
         """
         eval_dataloader = self.get_eval_dataloader(eval_dataset)
 
-        output = self._prediction_loop(eval_dataloader, description="Evaluation")
+        output = self._prediction_loop(eval_dataloader, description="Evaluation", head_mask=head_mask)
 
         self._log(output.metrics)
 
@@ -758,7 +758,7 @@ class Trainer:
 
             for k, v in inputs.items():
                 inputs[k] = v.to(self.args.device)
-            if head_mask:
+            if head_mask is not None:
                 head_mask = head_mask.to(self.args.device)
             with torch.no_grad():
                 outputs = model(**inputs, head_mask=head_mask)
