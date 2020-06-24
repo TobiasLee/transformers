@@ -304,14 +304,22 @@ class Trainer:
             return self.optimizers
         # Prepare optimizer and schedule (linear warmup and decay)
         no_decay = ["bias", "LayerNorm.weight"]
+        head_predictor = ["head_predictor"]
         optimizer_grouped_parameters = [
             {
-                "params": [p for n, p in self.model.named_parameters() if not any(nd in n for nd in no_decay)],
+                "params": [p for n, p in self.model.named_parameters() if not any(nd in n for nd in no_decay)
+                           and "head_predictor" not in n],
                 "weight_decay": self.args.weight_decay,
             },
             {
-                "params": [p for n, p in self.model.named_parameters() if any(nd in n for nd in no_decay)],
+                "params": [p for n, p in self.model.named_parameters() if any(nd in n for nd in no_decay)
+                           and "head_predictor" not in n],
                 "weight_decay": 0.0,
+            },
+            {
+                "params": [p for n, p in self.model.named_parameters() if "head_predictor" in n],
+                "weight_decay": self.args.weight_decay,
+                "lr": self.args.predictor_lr
             },
         ]
         optimizer = AdamW(optimizer_grouped_parameters, lr=self.args.learning_rate, eps=self.args.adam_epsilon)
