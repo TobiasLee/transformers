@@ -11,13 +11,16 @@ class HeadPredictor(nn.Module):
                                        nn.ReLU(),
                                        nn.Linear(config.head_predictor_hidden, config.num_attention_heads))
 
-        self.softmax = nn.Softmax(dim=-1)
+        self.gate = nn.Sigmoid() # ftmax(dim=-1)
 
     def forward(self, layer_hidden_states):
         scores = self.predictor(layer_hidden_states)  # bsz, seq_len, num_attention_heads
-        head_probs = self.softmax(scores)  # bsz, seq_len, num_attention_heads
-        head_probs = head_probs.transpose(0, 2, 1)  # bsz, num_attention_heads, seq_len
+        head_probs = self.gate(scores)  # bsz, seq_len, num_attention_heads
+        head_probs = head_probs.transpose(2, 1)  # bsz, num_attention_heads, seq_len
+        #if not self.training:
+        #    print( torch.mean(torch.mean(torch.sum(head_probs, dim=1), dim=-1), dim=-1))
         head_probs = head_probs.unsqueeze(-1)  # bsz,  num_attention_heads, seq_len, 1
+
         return head_probs  # bsz, num_attention_heads, seq_len, 1
 
 
