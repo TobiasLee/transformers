@@ -200,18 +200,22 @@ def main():
 
         for eval_dataset in eval_datasets:
             trainer.compute_metrics = build_compute_metrics_fn(eval_dataset.args.task_name)
-            eval_result = trainer.evaluate(eval_dataset=eval_dataset)
+            eval_result, learned_head_masks = trainer.evaluate(eval_dataset=eval_dataset, require_head_masks=True)
 
             output_eval_file = os.path.join(
                 training_args.output_dir, f"eval_results_{eval_dataset.args.task_name}.txt"
             )
+
             if trainer.is_world_master():
                 with open(output_eval_file, "w") as writer:
                     logger.info("***** Eval results {} *****".format(eval_dataset.args.task_name))
                     for key, value in eval_result.items():
                         logger.info("  %s = %s", key, value)
                         writer.write("%s = %s\n" % (key, value))
-
+                output_mask_file = os.path.join(
+                    training_args.output_dir, f"eval_mask_{eval_dataset.args.task_name}.npy"
+                )
+                np.save(output_mask_file, learned_head_masks.cpu().numpy())
             eval_results.update(eval_result)
 
     if training_args.do_predict:
