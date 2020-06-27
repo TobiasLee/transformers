@@ -25,7 +25,6 @@ from .optimization import AdamW, get_linear_schedule_with_warmup
 from .trainer_utils import PREFIX_CHECKPOINT_DIR, EvalPrediction, PredictionOutput, TrainOutput
 from .training_args import TrainingArguments, is_tpu_available
 
-
 try:
     from apex import amp
 
@@ -135,7 +134,7 @@ class SequentialDistributedSampler(Sampler):
         assert len(indices) == self.total_size
 
         # subsample
-        indices = indices[self.rank * self.num_samples : (self.rank + 1) * self.num_samples]
+        indices = indices[self.rank * self.num_samples: (self.rank + 1) * self.num_samples]
         assert len(indices) == self.num_samples
 
         return iter(indices)
@@ -169,16 +168,16 @@ class Trainer:
     epoch: Optional[float] = None
 
     def __init__(
-        self,
-        model: PreTrainedModel,
-        args: TrainingArguments,
-        data_collator: Optional[DataCollator] = None,
-        train_dataset: Optional[Dataset] = None,
-        eval_dataset: Optional[Dataset] = None,
-        compute_metrics: Optional[Callable[[EvalPrediction], Dict]] = None,
-        prediction_loss_only=False,
-        tb_writer: Optional["SummaryWriter"] = None,
-        optimizers: Tuple[torch.optim.Optimizer, torch.optim.lr_scheduler.LambdaLR] = None,
+            self,
+            model: PreTrainedModel,
+            args: TrainingArguments,
+            data_collator: Optional[DataCollator] = None,
+            train_dataset: Optional[Dataset] = None,
+            eval_dataset: Optional[Dataset] = None,
+            compute_metrics: Optional[Callable[[EvalPrediction], Dict]] = None,
+            prediction_loss_only=False,
+            tb_writer: Optional["SummaryWriter"] = None,
+            optimizers: Tuple[torch.optim.Optimizer, torch.optim.lr_scheduler.LambdaLR] = None,
     ):
         """
         Trainer is a simple but feature-complete training and eval loop for PyTorch,
@@ -291,7 +290,7 @@ class Trainer:
         return data_loader
 
     def get_optimizers(
-        self, num_training_steps: int
+            self, num_training_steps: int
     ) -> Tuple[torch.optim.Optimizer, torch.optim.lr_scheduler.LambdaLR]:
         """
         Setup the optimizer and the learning rate scheduler.
@@ -371,7 +370,7 @@ class Trainer:
         if self.args.max_steps > 0:
             t_total = self.args.max_steps
             num_train_epochs = (
-                self.args.max_steps // (len(train_dataloader) // self.args.gradient_accumulation_steps) + 1
+                    self.args.max_steps // (len(train_dataloader) // self.args.gradient_accumulation_steps) + 1
             )
         else:
             t_total = int(len(train_dataloader) // self.args.gradient_accumulation_steps * self.args.num_train_epochs)
@@ -381,9 +380,9 @@ class Trainer:
 
         # Check if saved optimizer or scheduler states exist
         if (
-            model_path is not None
-            and os.path.isfile(os.path.join(model_path, "optimizer.pt"))
-            and os.path.isfile(os.path.join(model_path, "scheduler.pt"))
+                model_path is not None
+                and os.path.isfile(os.path.join(model_path, "optimizer.pt"))
+                and os.path.isfile(os.path.join(model_path, "scheduler.pt"))
         ):
             # Load in optimizer and scheduler states
             optimizer.load_state_dict(
@@ -419,9 +418,9 @@ class Trainer:
             total_train_batch_size = self.args.train_batch_size * xm.xrt_world_size()
         else:
             total_train_batch_size = (
-                self.args.train_batch_size
-                * self.args.gradient_accumulation_steps
-                * (torch.distributed.get_world_size() if self.args.local_rank != -1 else 1)
+                    self.args.train_batch_size
+                    * self.args.gradient_accumulation_steps
+                    * (torch.distributed.get_world_size() if self.args.local_rank != -1 else 1)
             )
         logger.info("***** Running training *****")
         logger.info("  Num examples = %d", self.num_examples(train_dataloader))
@@ -442,7 +441,7 @@ class Trainer:
                 self.global_step = int(model_path.split("-")[-1].split("/")[0])
                 epochs_trained = self.global_step // (len(train_dataloader) // self.args.gradient_accumulation_steps)
                 steps_trained_in_current_epoch = self.global_step % (
-                    len(train_dataloader) // self.args.gradient_accumulation_steps
+                        len(train_dataloader) // self.args.gradient_accumulation_steps
                 )
 
                 logger.info("  Continuing training from checkpoint, will skip to saved global_step")
@@ -481,9 +480,9 @@ class Trainer:
                 tr_loss += self._training_step(model, inputs, optimizer, head_mask)
 
                 if (step + 1) % self.args.gradient_accumulation_steps == 0 or (
-                    # last step in epoch but step is always smaller than gradient_accumulation_steps
-                    len(epoch_iterator) <= self.args.gradient_accumulation_steps
-                    and (step + 1) == len(epoch_iterator)
+                        # last step in epoch but step is always smaller than gradient_accumulation_steps
+                        len(epoch_iterator) <= self.args.gradient_accumulation_steps
+                        and (step + 1) == len(epoch_iterator)
                 ):
                     if self.args.fp16:
                         torch.nn.utils.clip_grad_norm_(amp.master_params(optimizer), self.args.max_grad_norm)
@@ -502,7 +501,7 @@ class Trainer:
                     self.epoch = epoch + (step + 1) / len(epoch_iterator)
 
                     if (self.args.logging_steps > 0 and self.global_step % self.args.logging_steps == 0) or (
-                        self.global_step == 1 and self.args.logging_first_step
+                            self.global_step == 1 and self.args.logging_first_step
                     ):
                         logs: Dict[str, float] = {}
                         logs["loss"] = (tr_loss - logging_loss) / self.args.logging_steps
@@ -574,7 +573,7 @@ class Trainer:
             print(output)
 
     def _training_step(
-        self, model: nn.Module, inputs: Dict[str, torch.Tensor], optimizer: torch.optim.Optimizer, head_mask=None
+            self, model: nn.Module, inputs: Dict[str, torch.Tensor], optimizer: torch.optim.Optimizer, head_mask=None
     ) -> float:
         model.train()
         for k, v in inputs.items():
@@ -688,10 +687,11 @@ class Trainer:
             shutil.rmtree(checkpoint)
 
     def evaluate(
-        self, eval_dataset: Optional[Dataset] = None,
+            self, eval_dataset: Optional[Dataset] = None,
             prediction_loss_only: Optional[bool] = None,
-            head_mask=None
-    ) -> Dict[str, float]:
+            head_mask=None,
+            require_head_masks=False
+    ):
         """
         Run evaluation and return metrics.
 
@@ -707,16 +707,23 @@ class Trainer:
                 - the potential metrics computed from the predictions
         """
         eval_dataloader = self.get_eval_dataloader(eval_dataset)
-
-        output = self._prediction_loop(eval_dataloader, description="Evaluation", head_mask=head_mask)
+        if not require_head_masks:
+            output = self._prediction_loop(eval_dataloader, description="Evaluation", head_mask=head_mask,
+                                           require_head_masks=False)
+        else:
+            output, learned_head_masks = self._prediction_loop(eval_dataloader, description="Evaluation",
+                                                               head_mask=head_mask,
+                                                               require_head_masks=True)
 
         self._log(output.metrics)
 
         if self.args.tpu_metrics_debug:
             # tpu-comment: Logging debug metrics for PyTorch/XLA (compile, execute times, ops, etc.)
             xm.master_print(met.metrics_report())
-
-        return output.metrics
+        if not require_head_masks:
+            return output.metrics
+        else:
+            return output.metrics, learned_head_masks
 
     def predict(self, test_dataset: Dataset, head_mask=None) -> PredictionOutput:
         """
@@ -730,8 +737,9 @@ class Trainer:
         return self._prediction_loop(test_dataloader, description="Prediction", head_mask=head_mask)
 
     def _prediction_loop(
-        self, dataloader: DataLoader, description: str, prediction_loss_only: Optional[bool] = None, head_mask=None
-    ) -> PredictionOutput:
+            self, dataloader: DataLoader, description: str, prediction_loss_only: Optional[bool] = None, head_mask=None,
+            require_head_masks=False
+    ):
         """
         Prediction/evaluation loop, shared by `evaluate()` and `predict()`.
 
@@ -756,6 +764,7 @@ class Trainer:
         eval_losses: List[float] = []
         preds: torch.Tensor = None
         label_ids: torch.Tensor = None
+        learned_head_masks: torch.Tensor = None
         model.eval()
 
         if is_tpu_available():
@@ -775,7 +784,14 @@ class Trainer:
                     eval_losses += [step_eval_loss.mean().item()]
                 else:
                     logits = outputs[0]
-
+                if require_head_masks:
+                    head_masks = outputs[-1] # the last one， tuple: (Tensor(bsz,  num_attention_heads, seq_len, 1), )
+                    head_masks = torch.stack(head_masks).squeeze() # (12, bsz, num_heads, seq_len, 1)
+                    head_masks = head_masks.transpose(1, 0) # bsz, num_layer, num_heads, seq_len
+                    if learned_head_masks is None:
+                        learned_head_masks = head_masks.detach()
+                    else:
+                        learned_head_masks = torch.cat((learned_head_masks, head_masks.detach()), dim=0)
             if not prediction_loss_only:
                 if preds is None:
                     preds = logits.detach()
@@ -817,8 +833,10 @@ class Trainer:
         for key in list(metrics.keys()):
             if not key.startswith("eval_"):
                 metrics[f"eval_{key}"] = metrics.pop(key)
-
-        return PredictionOutput(predictions=preds, label_ids=label_ids, metrics=metrics)
+        if require_head_masks:
+            return PredictionOutput(predictions=preds, label_ids=label_ids, metrics=metrics), learned_head_masks
+        else:
+            return PredictionOutput(predictions=preds, label_ids=label_ids, metrics=metrics)
 
     def distributed_concat(self, tensor: torch.Tensor, num_total_examples: int) -> torch.Tensor:
         assert self.args.local_rank != -1

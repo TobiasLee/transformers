@@ -11,7 +11,7 @@ class HeadPredictor(nn.Module):
                                        nn.ReLU(),
                                        nn.Linear(config.head_predictor_hidden, config.num_attention_heads))
 
-        self.gate = nn.Sigmoid() # ftmax(dim=-1)
+        self.gate = nn.Sigmoid()  # softmax(dim=-1)
 
     def forward(self, layer_hidden_states):
         scores = self.predictor(layer_hidden_states)  # bsz, seq_len, num_attention_heads
