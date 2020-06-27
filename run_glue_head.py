@@ -195,7 +195,7 @@ def main():
         if data_args.task_name == "mnli":
             mnli_mm_data_args = dataclasses.replace(data_args, task_name="mnli-mm")
             eval_datasets.append(
-                GlueDataset(mnli_mm_data_args, tokenizer=tokenizer, mode="dev", cache_dir=model_args.cache_dir)
+                GlueDataset(mnli_mm_data_args, tokenizer=tokenizer, evaluate=True)
             )
 
         for eval_dataset in eval_datasets:
