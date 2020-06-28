@@ -232,7 +232,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
         self.bert = BertModel(config)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
         self.classifier = nn.Linear(config.hidden_size, config.num_labels)
-
+        self.sparse_ratio = config.sparse_ratio
         self.init_weights()
 
     def forward(
@@ -312,6 +312,13 @@ class BertForSequenceClassification(BertPreTrainedModel):
             else:
                 loss_fct = CrossEntropyLoss()
                 loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
+            # add L1 regularization here
+            l1_reg = nn.L1Loss()
+            # iterate over the head masks
+            head_masks = outputs[-1]
+            for mask in head_masks:
+                loss += self.sparse_ratio * l1_reg(mask, torch.zeros_like(mask))  # add it to loss
+            # can sparse ratio become layer-specific?
             outputs = (loss,) + outputs
 
         return outputs  # (loss), logits, (hidden_states), (attentions)
