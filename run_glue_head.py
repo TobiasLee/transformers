@@ -64,6 +64,9 @@ class ModelArguments:
     head_predictor_hidden:int = field(
         default=1024, metadata={"help": "hidden unit number of head predictor"}
     )
+    sparse_ratio: float = field(
+        default=1e-3, metadata={"help": "sparse ratio of l1 loss"}
+    )
 
 
 def main():
@@ -131,7 +134,10 @@ def main():
         model_args.tokenizer_name if model_args.tokenizer_name else model_args.model_name_or_path,
         cache_dir=model_args.cache_dir,
     )
+
     config.head_predictor_hidden = model_args.head_predictor_hidden
+    config.sparse_ratio = model_args.sparse_ratio
+
     # fix here for quick experiment
     model = BertForSequenceClassification.from_pretrained(
         model_args.model_name_or_path,
