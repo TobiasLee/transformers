@@ -318,7 +318,7 @@ class Trainer:
             {
                 "params": [p for n, p in self.model.named_parameters() if "head_predictor" in n],
                 "weight_decay": self.args.weight_decay,
-                "lr": self.args.predictor_lr
+                "lr": self.args.adaptive_head_predictor_lr
             },
         ]
         optimizer = AdamW(optimizer_grouped_parameters, lr=self.args.learning_rate, eps=self.args.adam_epsilon)
