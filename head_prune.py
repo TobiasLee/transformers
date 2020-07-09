@@ -264,6 +264,7 @@ def search_optimal_heads(args, model, predictor, optimizer, sparse_loss, eval_da
         optimizer.step()  # update predictor score
         # loss for compute head importance
         no_mask = torch.ones_like(head_score)
+        no_mask.requires_grad_(True)
         importance_loss = model(**inputs, head_mask=no_mask)[0]
         head_importance = torch.autograd.grad(importance_loss, no_mask, retain_graph=False)[0].abs().detach()
         head_score = predictor(head_importance.transpose(1, 0))  # update head score
