@@ -136,7 +136,7 @@ def print_2d_tensor(tensor):
 
 def compute_heads_importance(
         args, model, eval_dataloader, compute_entropy=True, compute_importance=True, head_mask=None,
-        actually_pruned=False, compute_mlp_importance=False, mlp_mask=None,
+        actually_pruned=False, compute_mlp_importance=False, mlp_mask=None, save_batch_importance=False
 ):
     """ This method shows how to compute:
         - head attention entropy
@@ -162,6 +162,7 @@ def compute_heads_importance(
     preds = None
     labels = None
     tot_tokens = 0.0
+    importances = None
     for step, inputs in enumerate(tqdm(eval_dataloader, desc="Iteration", disable=args.local_rank not in [-1, 0])):
         for k, v in inputs.items():
             inputs[k] = v.to(args.device)
@@ -186,6 +187,12 @@ def compute_heads_importance(
             head_importance += head_mask.grad.abs().detach()
         if compute_mlp_importance:
             mlp_importance += mlp_mask.grad.abs().detach()
+        if save_batch_importance:
+            batch_importance =  (head_mask.grad.abs().detach() / inputs["attention_mask"].float().detach().sum()).detach().cpu().numpy()
+            if importances is None:
+                importances = batch_importance
+            else:
+                importances = np.append(importances, batch_importance, axis=0)
 
         # Also store our logits/labels if we want to compute metrics afterwards
         if preds is None:
@@ -214,7 +221,9 @@ def compute_heads_importance(
         np.save(os.path.join(args.output_dir, "attn_entropy.npy"), attn_entropy.detach().cpu().numpy())
     if compute_importance:
         np.save(os.path.join(args.output_dir, "head_importance.npy"), head_importance.detach().cpu().numpy())
-
+    if save_batch_importance:
+        np.save(os.path.join(args.output_dir, "batch_importance.npy"), importances)
+        assert 1==0, "we broke here"  
     # logger.info("Attention entropies")
     # print_2d_tensor(attn_entropy)
     logger.info("Head importance scores")
@@ -235,7 +244,7 @@ def compute_heads_importance(
 
 def search_optimal_heads(args, model, predictor, optimizer, sparse_loss, eval_dataloader, head_score):
     _, head_importance, preds, labels = compute_heads_importance(args, model, eval_dataloader, compute_entropy=False,
-                                                                 head_mask=head_score)
+                                                                 head_mask=head_score, save_batch_importance=args.save_batch_importance)
     preds = np.argmax(preds, axis=1) if args.output_mode == "classification" else np.squeeze(preds)
     original_score = glue_compute_metrics(args.task_name, preds, labels)[args.metric_name]
     logger.info("Pruning: current  score: %f",
@@ -356,7 +365,9 @@ def main():
     parser.add_argument(
         "--overwrite_cache", action="store_true", help="Overwrite the cached training and evaluation sets"
     )
-
+    parser.add_argument(
+        "--save_batch_importance", action="store_true", help="Compute the batch importance and save it"
+    )
     parser.add_argument(
         "--dont_normalize_importance_by_layer", action="store_true", help="Don't normalize importance score by layers"
     )
@@ -475,7 +486,7 @@ def main():
     eval_dataset.set_index(0)  # use the first half
     if args.data_subset > 0:
         eval_dataset = Subset(eval_dataset, list(range(min(args.data_subset, len(eval_dataset)))))
-    eval_sampler = RandomSampler(eval_dataset) if args.local_rank == -1 else DistributedSampler(eval_dataset)
+    eval_sampler = SequentialSampler(eval_dataset) if args.local_rank == -1 else DistributedSampler(eval_dataset)
     eval_dataloader = DataLoader(
         eval_dataset, sampler=eval_sampler, batch_size=args.batch_size, collate_fn=DefaultDataCollator().collate_batch
     )
@@ -513,7 +524,7 @@ def main():
 #
     if args.data_subset > 0:
         test_dataset = Subset(test_dataset, list(range(min(args.data_subset, len(test_dataset)))))
-    test_sampler = RandomSampler(test_dataset) if args.local_rank == -1 else DistributedSampler(eval_dataset)
+    test_sampler = SequentialSampler(test_dataset) if args.local_rank == -1 else DistributedSampler(eval_dataset)
     test_dataloader = DataLoader(
         test_dataset, sampler=test_sampler, batch_size=args.batch_size, collate_fn=DefaultDataCollator().collate_batch
     )
