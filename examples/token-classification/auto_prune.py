@@ -369,10 +369,16 @@ def search_optimal_heads(args, model, predictor, optimizer, sparse_loss, eval_da
         )  # Loss and logits are the first, attention the last
         s_loss = sparse_loss(head_score)
         total = loss + sparse_ratio * s_loss  # 观察到一个现象 经常是同一个head 不同 Layer 都会置成0  不过，效果还是有一定的提升的
-        head_importance = torch.autograd.grad(loss, head_score, retain_graph=True)[0].abs().detach()
         total.backward()  # Backpropagate to populate the gradients in the head mask
         optimizer.step()  # update predictor score
+
+        # compute head_importance again
+        no_mask = torch.ones_like(head_score)
+        no_mask.requires_grad_(True)
+        importance_loss = model(**inputs, head_mask=no_mask)[0]
+        head_importance = torch.autograd.grad(importance_loss, no_mask)[0].abs().detach()
         head_score = predictor(head_importance.transpose(1, 0))  # update head score
+
     logger.info('current total loss: %f' % total.item())
     logger.info('current head score')
     print_2d_tensor(head_score)
