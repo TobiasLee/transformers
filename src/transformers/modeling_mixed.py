@@ -43,9 +43,9 @@ from src.transformers.modeling_bert import *
 #   "vocab_size": 30522
 # }
 
-class MixedBertForSequenceClassification(nn.Module):
+class MixedBertForSequenceClassification(BertPreTrainedModel):
     def __init__(self, model_base, model_large, switch_rate=0.5):
-        super().__init__()
+        super().__init__(model_base.config)
         self.bernoulli = Bernoulli(torch.tensor([switch_rate]))
         self.model_base = model_base
         self.model_large = model_large

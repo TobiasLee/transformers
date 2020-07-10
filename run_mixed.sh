@@ -5,7 +5,7 @@ BSZ=4
 MAX_LEN=128
 EPOCH=3.0
 LR=2e-5
-GPU="2,3,4,5"
+GPU="1"
 for seed in 1234 #2345 3456 4567 5678
 do
 CUDA_VISIBLE_DEVICES=$GPU python run_glue_mixed.py \
