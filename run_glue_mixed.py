@@ -56,7 +56,9 @@ class ModelArguments:
     large_model_name_or_path: str = field(
         metadata={"help": "Path to pretrained base model or model identifier from huggingface.co/models"}
     )
-
+    mixed_model_name_or_path: str = field(
+        metadata={"help": "Path to pretrained base model or model identifier from huggingface.co/models"}
+    )
     config_name: Optional[str] = field(
         default=None, metadata={"help": "Pretrained config name or path if not the same as model_name"}
     )
@@ -123,13 +125,14 @@ def main():
     # The .from_pretrained methods guarantee that only one local process can concurrently
     # download model & vocab.
 
+    print("--------------\n%s" %  model_args.base_model_name_or_path)
     config_base = AutoConfig.from_pretrained(
         model_args.config_name if model_args.config_name else model_args.base_model_name_or_path,
         num_labels=num_labels,
         finetuning_task=data_args.task_name,
         cache_dir=model_args.cache_dir,
     )
-    print(model_args.large_model_name_or_path)
+
     config_large = AutoConfig.from_pretrained(
         model_args.config_name if model_args.config_name else model_args.large_model_name_or_path,
         num_labels=num_labels,
@@ -161,15 +164,15 @@ def main():
 
     # Get datasets
     train_dataset = (
-        GlueDataset(data_args, tokenizer=tokenizer, cache_dir=model_args.cache_dir) if training_args.do_train else None
+        GlueDataset(data_args, tokenizer=tokenizer, evaluate=False) if training_args.do_train else None
     )
     eval_dataset = (
-        GlueDataset(data_args, tokenizer=tokenizer, mode="dev", cache_dir=model_args.cache_dir)
+        GlueDataset(data_args, tokenizer=tokenizer, evaluate=True)  #)mode="dev", cache_dir=model_args.cache_dir)
         if training_args.do_eval
         else None
     )
     test_dataset = (
-        GlueDataset(data_args, tokenizer=tokenizer, mode="test", cache_dir=model_args.cache_dir)
+        GlueDataset(data_args, tokenizer=tokenizer, evaluate=True) # mode="test", cache_dir=model_args.cache_dir)
         if training_args.do_predict
         else None
     )
@@ -196,7 +199,7 @@ def main():
     # Training
     if training_args.do_train:
         trainer.train(
-            model_path=model_args.model_name_or_path if os.path.isdir(model_args.model_name_or_path) else None
+            model_path=model_args.mixed_model_name_or_path if os.path.isdir(model_args.mixed_model_name_or_path) else None
         )
         trainer.save_model()
         # For convenience, we also re-save the tokenizer to the same directory,
