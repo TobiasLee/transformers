@@ -2,7 +2,6 @@ from torch.distributions import Bernoulli
 
 from src.transformers.modeling_bert import *
 
-
 # {  BERT-large
 #   "architectures": [
 #     "BertForMaskedLM"
@@ -42,13 +41,16 @@ from src.transformers.modeling_bert import *
 #   "type_vocab_size": 2,
 #   "vocab_size": 30522
 # }
+WEIGHTS_NAME = "pytorch_model.bin"
 
-class MixedBertForSequenceClassification(BertPreTrainedModel):
+
+class MixedBertForSequenceClassification(nn.Module):
     def __init__(self, model_base, model_large, switch_rate=0.5):
-        super().__init__(model_base.config)
+        super().__init__()
         self.bernoulli = Bernoulli(torch.tensor([switch_rate]))
         self.model_base = model_base
         self.model_large = model_large
+        self.config = BertConfig()
 
     def forward(
             self,
@@ -85,6 +87,30 @@ class MixedBertForSequenceClassification(BertPreTrainedModel):
             )
 
         return outputs  # (loss), logits, (hidden_states), (attentions)
+
+    def save_pretrained(self, save_directory):
+        """ Save a model and its configuration file to a directory, so that it
+            can be re-loaded using the `:func:`~transformers.PreTrainedModel.from_pretrained`` class method.
+
+            Arguments:
+                save_directory: directory to which to save.
+        """
+        assert os.path.isdir(
+            save_directory
+        ), "Saving path should be a directory where the model and configuration can be saved"
+
+        # Only save the model itself if we are using distributed training
+        model_to_save = self.module if hasattr(self, "module") else self
+
+        # Attach architecture to the config
+        model_to_save.config.architectures = [model_to_save.__class__.__name__]
+
+        # If we save using the predefined names, we can load using `from_pretrained`
+        output_model_file = os.path.join(save_directory, WEIGHTS_NAME)
+        model_to_save.config.save_pretrained(save_directory)
+        torch.save(model_to_save.state_dict(), output_model_file)
+
+        logger.info("Model weights saved in {}".format(output_model_file))
 
 
 def switchable_forward(model_base, model_large, inputs_embeds, bernouali):
