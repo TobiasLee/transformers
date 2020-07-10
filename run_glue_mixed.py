@@ -123,27 +123,36 @@ def main():
     # The .from_pretrained methods guarantee that only one local process can concurrently
     # download model & vocab.
 
-    config = AutoConfig.from_pretrained(
-        model_args.config_name if model_args.config_name else model_args.model_name_or_path,
+    config_base = AutoConfig.from_pretrained(
+        model_args.config_name if model_args.config_name else model_args.base_model_name_or_path,
         num_labels=num_labels,
         finetuning_task=data_args.task_name,
         cache_dir=model_args.cache_dir,
     )
-    tokenizer = AutoTokenizer.from_pretrained(
-        model_args.tokenizer_name if model_args.tokenizer_name else model_args.model_name_or_path,
+    print(model_args.large_model_name_or_path)
+    config_large = AutoConfig.from_pretrained(
+        model_args.config_name if model_args.config_name else model_args.large_model_name_or_path,
+        num_labels=num_labels,
+        finetuning_task=data_args.task_name,
         cache_dir=model_args.cache_dir,
     )
+    
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_args.tokenizer_name if model_args.tokenizer_name else model_args.base_model_name_or_path,
+        cache_dir=model_args.cache_dir,
+    )
+    
     model_base = AutoModelForSequenceClassification.from_pretrained(
         model_args.base_model_name_or_path,  # base model
-        from_tf=bool(".ckpt" in model_args.model_name_or_path),
-        config=config,
+        from_tf=bool(".ckpt" in model_args.base_model_name_or_path),
+        config=config_base,
         cache_dir=model_args.cache_dir,
     )
 
     model_large = AutoModelForSequenceClassification.from_pretrained(
         model_args.large_model_name_or_path,  # large model
-        from_tf=bool(".ckpt" in model_args.model_name_or_path),
-        config=config,
+        from_tf=bool(".ckpt" in model_args.large_model_name_or_path),
+        config=config_large,
         cache_dir=model_args.cache_dir,
     )
 
