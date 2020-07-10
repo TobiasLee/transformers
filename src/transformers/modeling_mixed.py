@@ -44,11 +44,11 @@ from src.transformers.modeling_bert import *
 # }
 
 class MixedBertForSequenceClassification(nn.Module):
-    def __init__(self, bert_base, bert_large, switch_rate=0.5):
+    def __init__(self, model_base, model_large, switch_rate=0.5):
         super().__init__()
         self.bernoulli = Bernoulli(torch.tensor([switch_rate]))
-        self.bert_base = bert_base
-        self.bert_large = bert_large
+        self.model_base = model_base
+        self.model_large = model_large
 
     def forward(
             self,
@@ -62,7 +62,7 @@ class MixedBertForSequenceClassification(nn.Module):
             mlp_mask=None
     ):
         if self.bernoulli.sample() == 1:  # switch base or large bert model
-            outputs = self.bert_base(
+            outputs = self.model_base(
                 input_ids,
                 attention_mask=attention_mask,
                 token_type_ids=token_type_ids,
@@ -73,7 +73,7 @@ class MixedBertForSequenceClassification(nn.Module):
                 labels=labels
             )
         else:
-            outputs = self.bert_large(
+            outputs = self.model_large(
                 input_ids,
                 attention_mask=attention_mask,
                 token_type_ids=token_type_ids,
