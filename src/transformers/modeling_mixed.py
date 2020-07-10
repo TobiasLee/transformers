@@ -69,7 +69,8 @@ class MixedBertForSequenceClassification(nn.Module):
                 position_ids=position_ids,
                 head_mask=head_mask,
                 inputs_embeds=inputs_embeds,
-                mlp_mask=mlp_mask
+                mlp_mask=mlp_mask,
+                labels=labels
             )
         else:
             outputs = self.bert_large(
@@ -79,7 +80,13 @@ class MixedBertForSequenceClassification(nn.Module):
                 position_ids=position_ids,
                 head_mask=head_mask,
                 inputs_embeds=inputs_embeds,
-                mlp_mask=mlp_mask
+                mlp_mask=mlp_mask,
+                labels=labels
             )
 
         return outputs  # (loss), logits, (hidden_states), (attentions)
+
+
+def switchable_forward(model_base, model_large, inputs_embeds, bernouali):
+    # do embedding outside
+    pass
