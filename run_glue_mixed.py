@@ -69,6 +69,10 @@ class ModelArguments:
         default=None, metadata={"help": "Where do you want to store the pretrained models downloaded from s3"}
     )
 
+    saved_path: Optional[str] = field(
+        default=None, metadata={"help": "Where do you want to store the pretrained models downloaded from s3"}
+    )
+
 
 def main():
     # See all possible arguments in src/transformers/training_args.py
@@ -158,8 +162,12 @@ def main():
         config=config_large,
         cache_dir=model_args.cache_dir,
     )
-
-    model = MixedBertForSequenceClassification(model_base=model_base, model_large=model_large,
+    if model_args.saved_path is not None:
+        model = MixedBertForSequenceClassification.from_pretrained(
+            path=model_args.saved_path, model_base=model_base, model_large=model_large
+        )
+    else:
+        model = MixedBertForSequenceClassification(model_base=model_base, model_large=model_large,
                                                switch_rate=0.5)
 
     # Get datasets

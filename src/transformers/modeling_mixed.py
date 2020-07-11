@@ -112,6 +112,95 @@ class MixedBertForSequenceClassification(nn.Module):
 
         logger.info("Model weights saved in {}".format(output_model_file))
 
+    @classmethod
+    def from_pretrained(cls, path, model_base, model_large):
+        archive_file = os.path.join(path, WEIGHTS_NAME)
+        try:
+            state_dict = torch.load(archive_file, map_location="cpu")
+        except Exception:
+            raise OSError(
+                "Unable to load weights from pytorch checkpoint file. "
+                "If you tried to load a PyTorch model from a TF 2.0 checkpoint, please set from_tf=True. "
+            )
+        model = cls(model_base, model_large)
+
+        missing_keys = []
+        unexpected_keys = []
+        error_msgs = []
+        old_keys = []
+        new_keys = []
+        for key in state_dict.keys():
+            new_key = None
+            if "gamma" in key:
+                new_key = key.replace("gamma", "weight")
+            if "beta" in key:
+                new_key = key.replace("beta", "bias")
+            if new_key:
+                old_keys.append(key)
+                new_keys.append(new_key)
+        for old_key, new_key in zip(old_keys, new_keys):
+            state_dict[new_key] = state_dict.pop(old_key)
+
+        # copy state_dict so _load_from_state_dict can modify it
+        metadata = getattr(state_dict, "_metadata", None)
+        state_dict = state_dict.copy()
+        if metadata is not None:
+            state_dict._metadata = metadata
+
+        # PyTorch's `_load_from_state_dict` does not copy parameters in a module's descendants
+        # so we need to apply the function recursively.
+        def load(module: nn.Module, prefix=""):
+            local_metadata = {} if metadata is None else metadata.get(prefix[:-1], {})
+            module._load_from_state_dict(
+                state_dict, prefix, local_metadata, True, missing_keys, unexpected_keys, error_msgs,
+            )
+            for name, child in module._modules.items():
+                if child is not None:
+                    load(child, prefix + name + ".")
+
+        # Make sure we are able to load base models as well as derived models (with heads)
+        start_prefix = ""
+        model_to_load = model
+        has_prefix_module = any(s.startswith(cls.base_model_prefix) for s in state_dict.keys())
+        if not hasattr(model, cls.base_model_prefix) and has_prefix_module:
+            start_prefix = cls.base_model_prefix + "."
+        if hasattr(model, cls.base_model_prefix) and not has_prefix_module:
+            model_to_load = getattr(model, cls.base_model_prefix)
+
+        load(model_to_load, prefix=start_prefix)
+
+        if model.__class__.__name__ != model_to_load.__class__.__name__:
+            base_model_state_dict = model_to_load.state_dict().keys()
+            head_model_state_dict_without_base_prefix = [
+                key.split(cls.base_model_prefix + ".")[-1] for key in model.state_dict().keys()
+            ]
+
+            missing_keys.extend(head_model_state_dict_without_base_prefix - base_model_state_dict)
+
+        if len(missing_keys) > 0:
+            logger.info(
+                "Weights of {} not initialized from pretrained model: {}".format(
+                    model.__class__.__name__, missing_keys
+                )
+            )
+        if len(unexpected_keys) > 0:
+            logger.info(
+                "Weights from pretrained model not used in {}: {}".format(
+                    model.__class__.__name__, unexpected_keys
+                )
+            )
+        if len(error_msgs) > 0:
+            raise RuntimeError(
+                "Error(s) in loading state_dict for {}:\n\t{}".format(
+                    model.__class__.__name__, "\n\t".join(error_msgs)
+                )
+            )
+        model.model_base.tie_weights()
+        model.model_large.tie_weights()
+        model.eval()
+
+        return model
+
 
 def switchable_forward(model_base, model_large, inputs_embeds, bernouali):
     # do embedding outside
