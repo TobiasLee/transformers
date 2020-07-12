@@ -48,12 +48,14 @@ WEIGHTS_NAME = "pytorch_model.bin"
 
 class MixedBertForSequenceClassification(nn.Module):
     base_model_prefix = "bert"
-    def __init__(self, model_base, model_large, switch_rate=0.5):
+
+    def __init__(self, model_base, model_large, switch_rate=0.5, mode='random'):
         super().__init__()
         self.bernoulli = Bernoulli(torch.tensor([switch_rate]))
         self.model_base = model_base
         self.model_large = model_large
         self.config = BertConfig()
+        self.mode = mode
 
     def forward(
             self,
@@ -66,7 +68,41 @@ class MixedBertForSequenceClassification(nn.Module):
             labels=None,
             mlp_mask=None
     ):
-        if self.bernoulli.sample() == 1:  # switch base or large bert model
+        if self.mode =='random':
+            if self.bernoulli.sample() == 1:  # switch base or large bert model
+                outputs = self.model_base(
+                    input_ids,
+                    attention_mask=attention_mask,
+                    token_type_ids=token_type_ids,
+                    position_ids=position_ids,
+                    head_mask=head_mask,
+                    inputs_embeds=inputs_embeds,
+                    mlp_mask=mlp_mask,
+                    labels=labels
+                )
+            else:
+                outputs = self.model_large(
+                    input_ids,
+                    attention_mask=attention_mask,
+                    token_type_ids=token_type_ids,
+                    position_ids=position_ids,
+                    head_mask=head_mask,
+                    inputs_embeds=inputs_embeds,
+                    mlp_mask=mlp_mask,
+                    labels=labels
+                )
+        elif self.mode =='large':
+            outputs = self.model_large(
+                input_ids,
+                attention_mask=attention_mask,
+                token_type_ids=token_type_ids,
+                position_ids=position_ids,
+                head_mask=head_mask,
+                inputs_embeds=inputs_embeds,
+                mlp_mask=mlp_mask,
+                labels=labels
+            )
+        elif self.mode == 'base':
             outputs = self.model_base(
                 input_ids,
                 attention_mask=attention_mask,
@@ -78,16 +114,7 @@ class MixedBertForSequenceClassification(nn.Module):
                 labels=labels
             )
         else:
-            outputs = self.model_large(
-                input_ids,
-                attention_mask=attention_mask,
-                token_type_ids=token_type_ids,
-                position_ids=position_ids,
-                head_mask=head_mask,
-                inputs_embeds=inputs_embeds,
-                mlp_mask=mlp_mask,
-                labels=labels
-            )
+            raise ValueError("Unsupported mix mode: selected between: random/large/base")
 
         return outputs  # (loss), logits, (hidden_states), (attentions)
 
@@ -116,8 +143,9 @@ class MixedBertForSequenceClassification(nn.Module):
         logger.info("Model weights saved in {}".format(output_model_file))
 
     @classmethod
-    def from_pretrained(cls, path, model_base, model_large):
+    def from_pretrained(cls, path, model_base, model_large, mode='random'):
         archive_file = os.path.join(path, WEIGHTS_NAME)
+
         try:
             state_dict = torch.load(archive_file, map_location="cpu")
         except Exception:
@@ -201,6 +229,7 @@ class MixedBertForSequenceClassification(nn.Module):
         model.model_base.tie_weights()
         model.model_large.tie_weights()
         model.eval()
+        model.mode = mode
 
         return model
 

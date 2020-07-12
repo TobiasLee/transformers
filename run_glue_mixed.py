@@ -15,7 +15,6 @@
 # limitations under the License.
 """ Finetuning the library models for sequence classification on GLUE (Bert, XLM, XLNet, RoBERTa, Albert, XLM-RoBERTa)."""
 
-
 import dataclasses
 import logging
 import os
@@ -38,7 +37,6 @@ from transformers import (
     glue_tasks_num_labels,
     set_seed,
 )
-
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +71,10 @@ class ModelArguments:
         default=None, metadata={"help": "Where do you want to store the pretrained models downloaded from s3"}
     )
 
+    mode: Optional[str] = field(
+        default="random", metadata={"help": "Use different mode for training or inference: [random, large, base]"}
+    )
+
 
 def main():
     # See all possible arguments in src/transformers/training_args.py
@@ -89,10 +91,10 @@ def main():
         model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 
     if (
-        os.path.exists(training_args.output_dir)
-        and os.listdir(training_args.output_dir)
-        and training_args.do_train
-        and not training_args.overwrite_output_dir
+            os.path.exists(training_args.output_dir)
+            and os.listdir(training_args.output_dir)
+            and training_args.do_train
+            and not training_args.overwrite_output_dir
     ):
         raise ValueError(
             f"Output directory ({training_args.output_dir}) already exists and is not empty. Use --overwrite_output_dir to overcome."
@@ -129,7 +131,7 @@ def main():
     # The .from_pretrained methods guarantee that only one local process can concurrently
     # download model & vocab.
 
-    print("--------------\n%s" %  model_args.base_model_name_or_path)
+    print("--------------\n%s" % model_args.base_model_name_or_path)
     config_base = AutoConfig.from_pretrained(
         model_args.config_name if model_args.config_name else model_args.base_model_name_or_path,
         num_labels=num_labels,
@@ -143,12 +145,12 @@ def main():
         finetuning_task=data_args.task_name,
         cache_dir=model_args.cache_dir,
     )
-    
+
     tokenizer = AutoTokenizer.from_pretrained(
         model_args.tokenizer_name if model_args.tokenizer_name else model_args.base_model_name_or_path,
         cache_dir=model_args.cache_dir,
     )
-    
+
     model_base = AutoModelForSequenceClassification.from_pretrained(
         model_args.base_model_name_or_path,  # base model
         from_tf=bool(".ckpt" in model_args.base_model_name_or_path),
@@ -164,23 +166,25 @@ def main():
     )
     if model_args.saved_path is not None:
         model = MixedBertForSequenceClassification.from_pretrained(
-            path=model_args.saved_path, model_base=model_base, model_large=model_large
+            path=model_args.saved_path, model_base=model_base, model_large=model_large,
+            mode=model_args.mode
         )
     else:
         model = MixedBertForSequenceClassification(model_base=model_base, model_large=model_large,
-                                               switch_rate=0.5)
+                                                   switch_rate=0.5,
+                                                   mode=model_args.mode)
 
     # Get datasets
     train_dataset = (
         GlueDataset(data_args, tokenizer=tokenizer, evaluate=False) if training_args.do_train else None
     )
     eval_dataset = (
-        GlueDataset(data_args, tokenizer=tokenizer, evaluate=True)  #)mode="dev", cache_dir=model_args.cache_dir)
+        GlueDataset(data_args, tokenizer=tokenizer, evaluate=True)  # )mode="dev", cache_dir=model_args.cache_dir)
         if training_args.do_eval
         else None
     )
     test_dataset = (
-        GlueDataset(data_args, tokenizer=tokenizer, evaluate=True) # mode="test", cache_dir=model_args.cache_dir)
+        GlueDataset(data_args, tokenizer=tokenizer, evaluate=True)  # mode="test", cache_dir=model_args.cache_dir)
         if training_args.do_predict
         else None
     )
@@ -207,7 +211,8 @@ def main():
     # Training
     if training_args.do_train:
         trainer.train(
-            model_path=model_args.mixed_model_name_or_path if os.path.isdir(model_args.mixed_model_name_or_path) else None
+            model_path=model_args.mixed_model_name_or_path if os.path.isdir(
+                model_args.mixed_model_name_or_path) else None
         )
         trainer.save_model()
         # For convenience, we also re-save the tokenizer to the same directory,
