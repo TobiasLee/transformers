@@ -68,7 +68,7 @@ class MixedBertForSequenceClassification(nn.Module):
             labels=None,
             mlp_mask=None
     ):
-        if self.mode =='random':
+        if self.mode == 'random':
             if self.bernoulli.sample() == 1:  # switch base or large bert model
                 outputs = self.model_base(
                     input_ids,
@@ -91,7 +91,7 @@ class MixedBertForSequenceClassification(nn.Module):
                     mlp_mask=mlp_mask,
                     labels=labels
                 )
-        elif self.mode =='large':
+        elif self.mode == 'large':
             outputs = self.model_large(
                 input_ids,
                 attention_mask=attention_mask,
@@ -238,14 +238,14 @@ class RandomPathModel(MixedBertForSequenceClassification):
     def __init__(self, model_base, model_large, switch_rate=0.5, num_parts=3):
         super(RandomPathModel, self).__init__(model_base, model_large, switch_rate)
         self.num_parts = num_parts
-        self.lo2hi_layers = nn.ModuleList([nn.Linear(self.model_base.config.hidden_size,
-                                                     self.model_large.config.hidden_size)
-                                           for _ in range(num_parts)])
-        self.hi2lo_layers = nn.ModuleList([nn.Linear(self.model_large.config.hidden_size,
-                                                     self.model_base.config.hidden_size)
-                                           for _ in range(num_parts)])
         self.output_attentions = self.model_base.config.output_attentions
         self.output_hidden_states = self.model_base.config.output_hidden_states
+        self.mixed_bert = MixedBert(model_base, model_large, num_parts)
+        # final layer
+        self.large_classifier = model_large.classifier
+        self.base_classifier = model_base.classifier
+        self.base_dropout = self.model_base.dropout
+        self.large_dropout = self.model_large.dropout
 
     def forward(
             self,
@@ -259,19 +259,61 @@ class RandomPathModel(MixedBertForSequenceClassification):
             mlp_mask=None
     ):
         # we divide the large & base model into 3 parts
-        pass
+        outputs = self.mixed_bert(
+            input_ids,
+            attention_mask=attention_mask,
+            token_type_ids=token_type_ids,
+            position_ids=position_ids,
+            head_mask=head_mask,
+            inputs_embeds=inputs_embeds,
+            mlp_mask=mlp_mask
+        )
 
-    def switch_encoder(self,
-                       input_ids=None,
-                       attention_mask=None,
-                       token_type_ids=None,
-                       position_ids=None,
-                       head_mask=None,
-                       inputs_embeds=None,
-                       encoder_hidden_states=None,
-                       encoder_attention_mask=None,
-                       mlp_mask=None
-                       ):
+        pooled_output = outputs[1]
+        hidden_num = pooled_output.size()[-1]
+        if hidden_num == self.large_classifier.in_features:
+            pooled_output = self.large_dropout(pooled_output)
+            logits = self.large_classifier(pooled_output)
+        else:
+            pooled_output = self.base_dropout(pooled_output)
+            logits = self.base_classifier(pooled_output)
+
+        outputs = (logits,) + outputs[2:]  # add hidden states and attention if they are here
+
+        if labels is not None:
+            if self.num_labels == 1:
+                #  We are doing regression
+                loss_fct = MSELoss()
+                loss = loss_fct(logits.view(-1), labels.view(-1))
+            else:
+                loss_fct = CrossEntropyLoss()
+                loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
+            outputs = (loss,) + outputs
+
+        return outputs  # (loss), logits, (hidden_states), (attentions)
+
+
+class MixedBert(nn.Module):
+    def __init__(self, model_base, model_large, num_parts):
+        super(MixedBert, self).__init__()
+        self.model_base = model_base
+        self.model_large = model_large
+        self.base_pooler = model_base.bert.pooler
+        self.large_pooler = model_base.bert.large_pooler
+        self.embedding = model_base.bert.embeddings
+        self.mixed_encoder = MixedEncoder(model_base, model_large, num_parts)
+
+    def forward(self,
+                input_ids=None,
+                attention_mask=None,
+                token_type_ids=None,
+                position_ids=None,
+                head_mask=None,
+                inputs_embeds=None,
+                encoder_hidden_states=None,
+                encoder_attention_mask=None,
+                mlp_mask=None
+                ):
         if input_ids is not None and inputs_embeds is not None:
             raise ValueError("You cannot specify both input_ids and inputs_embeds at the same time")
         elif input_ids is not None:
@@ -311,37 +353,28 @@ class RandomPathModel(MixedBertForSequenceClassification):
         head_mask = self.get_head_mask(head_mask, self.config.num_hidden_layers)
         if mlp_mask is None:
             mlp_mask = [None] * self.config.num_hidden_layers
-
-        # assume that base & large embeddings are same?
-        embedding_output = self.model_large.bert.embeddings(
+        embedding_output = self.embeddings(
             input_ids=input_ids, position_ids=position_ids, token_type_ids=token_type_ids, inputs_embeds=inputs_embeds
         )
+        encoder_outputs = self.mixed_encoder(
+            embedding_output,
+            attention_mask=extended_attention_mask,
+            head_mask=head_mask,
+            encoder_hidden_states=encoder_hidden_states,
+            encoder_attention_mask=encoder_extended_attention_mask,
+            mlp_mask=mlp_mask
+        )
+        sequence_output = encoder_outputs[0]
+        hidden_num = sequence_output.size()[-1]
 
-        dynamic_encoder = self.get_switchable_forward(self.num_parts)
-        all_hidden_states = ()
-        all_attentions = ()
-        for i, layer_module in enumerate(self.layer):
-            # print(i)
-            if self.output_hidden_states:
-                all_hidden_states = all_hidden_states + (hidden_states,)
-
-            layer_outputs = layer_module(
-                hidden_states, attention_mask, head_mask[i], encoder_hidden_states, encoder_attention_mask, mlp_mask[i]
-            )
-            hidden_states = layer_outputs[0]
-
-            if self.output_attentions:
-                all_attentions = all_attentions + (layer_outputs[1],)
-
-        # Add last layer
-        if self.output_hidden_states:
-            all_hidden_states = all_hidden_states + (hidden_states,)
-
-        outputs = (hidden_states,)
-        if self.output_hidden_states:
-            outputs = outputs + (all_hidden_states,)
-        if self.output_attentions:
-            outputs = outputs + (all_attentions,)
+        # pooler need to be switch according to the hidden size
+        if hidden_num == self.base_pooler.dense.in_features:
+            pooled_output = self.base_pooler(sequence_output)
+        else:
+            pooled_output = self.large_pooler(sequence_output)
+        # add hidden_states and attentions if they are here
+        outputs = (sequence_output, pooled_output,) + encoder_outputs[1:]
+        return outputs
 
 
 class MixedEncoder(nn.Module):
