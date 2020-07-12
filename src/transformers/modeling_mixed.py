@@ -4,6 +4,7 @@ import random
 from src.transformers import AutoConfig
 from src.transformers.modeling_bert import *
 from src.transformers.modeling_utils import ModuleUtilsMixin
+
 # {  BERT-large
 #   "architectures": [
 #     "BertForMaskedLM"
@@ -300,10 +301,10 @@ class MixedBert(nn.Module, ModuleUtilsMixin):
         self.model_large = model_large
         self.base_pooler = model_base.bert.pooler
         self.large_pooler = model_base.bert.pooler
-        self.embeddings = model_base.bert.embeddings
+        self.base_embeddings = model_base.bert.embeddings
+        self.large_embeddings = model_large.bert.embeddings
         self.mixed_encoder = MixedEncoder(model_base, model_large, num_parts)
-        self.config = model_base.config 
-
+        self.config = model_base.config
 
     def forward(self,
                 input_ids=None,
@@ -355,16 +356,25 @@ class MixedBert(nn.Module, ModuleUtilsMixin):
         head_mask = self.get_head_mask(head_mask, self.config.num_hidden_layers)
         if mlp_mask is None:
             mlp_mask = [None] * self.config.num_hidden_layers
-        embedding_output = self.embeddings(
-            input_ids=input_ids, position_ids=position_ids, token_type_ids=token_type_ids, inputs_embeds=inputs_embeds
-        )
+
+        layers = self.mixed_encoder.get_switchable_forward()
+        if layers[0].attention.self.query.in_features == self.model_base.config.hidden_size:
+            embedding_output = self.base_embeddings(
+                input_ids=input_ids, position_ids=position_ids, token_type_ids=token_type_ids, inputs_embeds=inputs_embeds
+            )
+        else:
+            embedding_output = self.large_embeddings(
+                input_ids=input_ids, position_ids=position_ids, token_type_ids=token_type_ids,
+                inputs_embeds=inputs_embeds
+            )
         encoder_outputs = self.mixed_encoder(
             embedding_output,
             attention_mask=extended_attention_mask,
             head_mask=head_mask,
             encoder_hidden_states=encoder_hidden_states,
             encoder_attention_mask=encoder_extended_attention_mask,
-            mlp_mask=mlp_mask
+            mlp_mask=mlp_mask,
+            layers=layers,
         )
         sequence_output = encoder_outputs[0]
         hidden_num = sequence_output.size()[-1]
@@ -377,6 +387,7 @@ class MixedBert(nn.Module, ModuleUtilsMixin):
         # add hidden_states and attentions if they are here
         outputs = (sequence_output, pooled_output,) + encoder_outputs[1:]
         return outputs
+
 
 class MixedEncoder(nn.Module):
     def __init__(self, model_base, model_large, num_parts=3):
@@ -410,12 +421,13 @@ class MixedEncoder(nn.Module):
                 encoder_hidden_states=None,
                 encoder_attention_mask=None,
                 mlp_mask=None,
+                layers=None,
                 ):
-        dynamic_encoder_layers = self.get_switchable_forward()
-        print(dynamic_encoder_layers)
+
+        # dynamic_encoder_layers = self.get_switchable_forward()
         all_hidden_states = ()
         all_attentions = ()
-        for i, layer_module in enumerate(dynamic_encoder_layers):
+        for i, layer_module in enumerate(layers):
             # print(i)
             if self.output_hidden_states:
                 all_hidden_states = all_hidden_states + (hidden_states,)
