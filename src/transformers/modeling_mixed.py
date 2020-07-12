@@ -1,5 +1,7 @@
 from torch.distributions import Bernoulli
+import random
 
+from src.transformers import AutoConfig
 from src.transformers.modeling_bert import *
 
 # {  BERT-large
@@ -202,6 +204,208 @@ class MixedBertForSequenceClassification(nn.Module):
         return model
 
 
-def switchable_forward(model_base, model_large, inputs_embeds, bernouali):
-    # do embedding outside
-    pass
+class RandomPathModel(MixedBertForSequenceClassification):
+    def __init__(self, model_base, model_large, switch_rate=0.5, num_parts=3):
+        super(RandomPathModel, self).__init__(model_base, model_large, switch_rate)
+        self.num_parts = num_parts
+        self.lo2hi_layers = nn.ModuleList([nn.Linear(self.model_base.config.hidden_size,
+                                                     self.model_large.config.hidden_size)
+                                           for _ in range(num_parts)])
+        self.hi2lo_layers = nn.ModuleList([nn.Linear(self.model_large.config.hidden_size,
+                                                     self.model_base.config.hidden_size)
+                                           for _ in range(num_parts)])
+        self.output_attentions = self.model_base.config.output_attentions
+        self.output_hidden_states = self.model_base.config.output_hidden_states
+
+    def forward(
+            self,
+            input_ids=None,
+            attention_mask=None,
+            token_type_ids=None,
+            position_ids=None,
+            head_mask=None,
+            inputs_embeds=None,
+            labels=None,
+            mlp_mask=None
+    ):
+        # we divide the large & base model into 3 parts
+        pass
+
+    def switch_encoder(self,
+                       input_ids=None,
+                       attention_mask=None,
+                       token_type_ids=None,
+                       position_ids=None,
+                       head_mask=None,
+                       inputs_embeds=None,
+                       encoder_hidden_states=None,
+                       encoder_attention_mask=None,
+                       mlp_mask=None
+                       ):
+        if input_ids is not None and inputs_embeds is not None:
+            raise ValueError("You cannot specify both input_ids and inputs_embeds at the same time")
+        elif input_ids is not None:
+            input_shape = input_ids.size()
+        elif inputs_embeds is not None:
+            input_shape = inputs_embeds.size()[:-1]
+        else:
+            raise ValueError("You have to specify either input_ids or inputs_embeds")
+
+        device = input_ids.device if input_ids is not None else inputs_embeds.device
+
+        if attention_mask is None:
+            attention_mask = torch.ones(input_shape, device=device)
+        if token_type_ids is None:
+            token_type_ids = torch.zeros(input_shape, dtype=torch.long, device=device)
+
+        # We can provide a self-attention mask of dimensions [batch_size, from_seq_length, to_seq_length]
+        # ourselves in which case we just need to make it broadcastable to all heads.
+        extended_attention_mask: torch.Tensor = self.get_extended_attention_mask(attention_mask, input_shape, device)
+
+        # If a 2D ou 3D attention mask is provided for the cross-attention
+        # we need to make broadcastabe to [batch_size, num_heads, seq_length, seq_length]
+        if self.config.is_decoder and encoder_hidden_states is not None:
+            encoder_batch_size, encoder_sequence_length, _ = encoder_hidden_states.size()
+            encoder_hidden_shape = (encoder_batch_size, encoder_sequence_length)
+            if encoder_attention_mask is None:
+                encoder_attention_mask = torch.ones(encoder_hidden_shape, device=device)
+            encoder_extended_attention_mask = self.invert_attention_mask(encoder_attention_mask)
+        else:
+            encoder_extended_attention_mask = None
+
+        # Prepare head mask if needed
+        # 1.0 in head_mask indicate we keep the head
+        # attention_probs has shape bsz x n_heads x N x N
+        # input head_mask has shape [num_heads] or [num_hidden_layers x num_heads]
+        # and head_mask is converted to shape [num_hidden_layers x batch x num_heads x seq_length x seq_length]
+        head_mask = self.get_head_mask(head_mask, self.config.num_hidden_layers)
+        if mlp_mask is None:
+            mlp_mask = [None] * self.config.num_hidden_layers
+
+        # assume that base & large embeddings are same?
+        embedding_output = self.model_large.bert.embeddings(
+            input_ids=input_ids, position_ids=position_ids, token_type_ids=token_type_ids, inputs_embeds=inputs_embeds
+        )
+
+        dynamic_encoder = self.get_switchable_forward(self.num_parts)
+        all_hidden_states = ()
+        all_attentions = ()
+        for i, layer_module in enumerate(self.layer):
+            # print(i)
+            if self.output_hidden_states:
+                all_hidden_states = all_hidden_states + (hidden_states,)
+
+            layer_outputs = layer_module(
+                hidden_states, attention_mask, head_mask[i], encoder_hidden_states, encoder_attention_mask, mlp_mask[i]
+            )
+            hidden_states = layer_outputs[0]
+
+            if self.output_attentions:
+                all_attentions = all_attentions + (layer_outputs[1],)
+
+        # Add last layer
+        if self.output_hidden_states:
+            all_hidden_states = all_hidden_states + (hidden_states,)
+
+        outputs = (hidden_states,)
+        if self.output_hidden_states:
+            outputs = outputs + (all_hidden_states,)
+        if self.output_attentions:
+            outputs = outputs + (all_attentions,)
+
+
+class MixedEncoder(nn.Module):
+    def __init__(self, model_base, model_large, num_parts=3):
+        super(MixedEncoder, self).__init__()
+        self.model_base = model_base
+        self.model_large = model_large
+        self.num_parts = num_parts
+        # extra transformation layers
+        self.lo2hi_layers = nn.ModuleList([nn.Linear(self.model_base.config.hidden_size,
+                                                     self.model_large.config.hidden_size)
+                                           for _ in range(num_parts)])
+        self.hi2lo_layers = nn.ModuleList([nn.Linear(self.model_large.config.hidden_size,
+                                                     self.model_base.config.hidden_size)
+                                           for _ in range(num_parts)])
+        # divide into parts
+        self.base_interval = self.model_base.config.num_hidden_layers // num_parts
+        self.large_interval = self.model_large.config.num_hidden_layers // num_parts
+        self.base_parts = [self.model_base.bert.encoder.layer[i:i + self.base_interval]
+                           for i in range(0, self.model_base.config.num_hidden_layers, self.base_interval)]
+
+        self.large_parts = [self.model_large.bert.encoder.layer[i:i + self.large_interval]
+                            for i in range(0, self.model_large.config.num_hidden_layers, self.large_interval)]
+        # configs
+        self.output_attentions = self.model_base.bert.config.output_attentions
+        self.output_hidden_states = self.model_base.bert.config.output_hidden_states
+
+    def forward(self,
+                hidden_states,
+                attention_mask=None,
+                head_mask=None,
+                encoder_hidden_states=None,
+                encoder_attention_mask=None,
+                mlp_mask=None,
+                ):
+        dynamic_encoder_layers = self.get_switchable_forward()
+        all_hidden_states = ()
+        all_attentions = ()
+        for i, layer_module in enumerate(dynamic_encoder_layers):
+            # print(i)
+            if self.output_hidden_states:
+                all_hidden_states = all_hidden_states + (hidden_states,)
+
+            layer_outputs = layer_module(
+                hidden_states, attention_mask, head_mask[i], encoder_hidden_states, encoder_attention_mask, mlp_mask[i]
+            )
+            hidden_states = layer_outputs[0]
+
+            if self.output_attentions:
+                all_attentions = all_attentions + (layer_outputs[1],)
+
+        # Add last layer
+        if self.output_hidden_states:
+            all_hidden_states = all_hidden_states + (hidden_states,)
+
+        outputs = (hidden_states,)
+        if self.output_hidden_states:
+            outputs = outputs + (all_hidden_states,)
+        if self.output_attentions:
+            outputs = outputs + (all_attentions,)
+        return outputs  # last-layer hidden state, (all hidden states), (all attentions)
+
+    def get_switchable_forward(self):  # get a switched encoder layer
+        forward = nn.ModuleList()
+        for i in range(self.num_parts):
+            #  random choice can be replaced with instance-level metric
+            selected = random.choice([self.base_parts[i], self.large_parts[i]])  # select between large or base blocks
+            pre_hidden = forward[-1].output.dense.out_features if len(forward) != 0 else None
+            next_hidden = selected[-1].output.dense.out_features
+            # add feature transformation between mismatch blocks
+            if pre_hidden is not None and next_hidden != pre_hidden:
+                if next_hidden > pre_hidden:
+                    forward.append(self.lo2hi_layers[i])
+                else:
+                    forward.append(self.hi2lo_layers[i])
+            forward.extend(selected)
+        return forward  # return a mixed forward encoder
+
+
+if __name__ == '__main__':
+    lo2hi_layers = nn.ModuleList([nn.Linear(123, 345) for _ in range(3)])
+    hi2lo_layers = nn.ModuleList([nn.Linear(345, 123) for _ in range(3)])
+    config_base = AutoConfig.from_pretrained(
+        'bert-base-cased',
+        num_labels=2,
+        finetuning_task="mrpc",
+        cache_dir=None,
+    )
+    config_large = AutoConfig.from_pretrained(
+        'bert-large-cased',
+        num_labels=2,
+        finetuning_task="mrpc",
+        cache_dir=None,
+    )
+    # model_base = BertForSequenceClassification(config_base)
+    # model_large = BertForSequenceClassification(config_large)
+    # switchable_forward(model_base, model_large, lo2hi_layers, hi2lo_layers)
