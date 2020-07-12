@@ -3,7 +3,7 @@ import random
 
 from src.transformers import AutoConfig
 from src.transformers.modeling_bert import *
-
+from src.transformers.modeling_utils import ModuleUtilsMixin
 # {  BERT-large
 #   "architectures": [
 #     "BertForMaskedLM"
@@ -293,15 +293,17 @@ class RandomPathModel(MixedBertForSequenceClassification):
         return outputs  # (loss), logits, (hidden_states), (attentions)
 
 
-class MixedBert(nn.Module):
+class MixedBert(nn.Module, ModuleUtilsMixin):
     def __init__(self, model_base, model_large, num_parts):
         super(MixedBert, self).__init__()
         self.model_base = model_base
         self.model_large = model_large
         self.base_pooler = model_base.bert.pooler
-        self.large_pooler = model_base.bert.large_pooler
-        self.embedding = model_base.bert.embeddings
+        self.large_pooler = model_base.bert.pooler
+        self.embeddings = model_base.bert.embeddings
         self.mixed_encoder = MixedEncoder(model_base, model_large, num_parts)
+        self.config = model_base.config 
+
 
     def forward(self,
                 input_ids=None,
@@ -375,7 +377,6 @@ class MixedBert(nn.Module):
         # add hidden_states and attentions if they are here
         outputs = (sequence_output, pooled_output,) + encoder_outputs[1:]
         return outputs
-
 
 class MixedEncoder(nn.Module):
     def __init__(self, model_base, model_large, num_parts=3):
