@@ -412,6 +412,7 @@ class MixedEncoder(nn.Module):
                 mlp_mask=None,
                 ):
         dynamic_encoder_layers = self.get_switchable_forward()
+        print(dynamic_encoder_layers)
         all_hidden_states = ()
         all_attentions = ()
         for i, layer_module in enumerate(dynamic_encoder_layers):
