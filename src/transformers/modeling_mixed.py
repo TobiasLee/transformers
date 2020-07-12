@@ -45,6 +45,7 @@ WEIGHTS_NAME = "pytorch_model.bin"
 
 
 class MixedBertForSequenceClassification(nn.Module):
+    base_model_prefix = "bert"
     def __init__(self, model_base, model_large, switch_rate=0.5):
         super().__init__()
         self.bernoulli = Bernoulli(torch.tensor([switch_rate]))
