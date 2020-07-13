@@ -282,13 +282,13 @@ class RandomPathModel(MixedBertForSequenceClassification):
         outputs = (logits,) + outputs[2:]  # add hidden states and attention if they are here
 
         if labels is not None:
-            if self.num_labels == 1:
+            if self.model_base.num_labels == 1:
                 #  We are doing regression
                 loss_fct = MSELoss()
                 loss = loss_fct(logits.view(-1), labels.view(-1))
             else:
                 loss_fct = CrossEntropyLoss()
-                loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
+                loss = loss_fct(logits.view(-1, self.model_base.num_labels), labels.view(-1))
             outputs = (loss,) + outputs
 
         return outputs  # (loss), logits, (hidden_states), (attentions)
@@ -300,7 +300,7 @@ class MixedBert(nn.Module, ModuleUtilsMixin):
         self.model_base = model_base
         self.model_large = model_large
         self.base_pooler = model_base.bert.pooler
-        self.large_pooler = model_base.bert.pooler
+        self.large_pooler = model_large.bert.pooler
         self.base_embeddings = model_base.bert.embeddings
         self.large_embeddings = model_large.bert.embeddings
         self.mixed_encoder = MixedEncoder(model_base, model_large, num_parts)
@@ -358,6 +358,7 @@ class MixedBert(nn.Module, ModuleUtilsMixin):
             mlp_mask = [None] * self.config.num_hidden_layers
 
         layers = self.mixed_encoder.get_switchable_forward()
+
         if layers[0].attention.self.query.in_features == self.model_base.config.hidden_size:
             embedding_output = self.base_embeddings(
                 input_ids=input_ids, position_ids=position_ids, token_type_ids=token_type_ids, inputs_embeds=inputs_embeds
@@ -431,10 +432,13 @@ class MixedEncoder(nn.Module):
             # print(i)
             if self.output_hidden_states:
                 all_hidden_states = all_hidden_states + (hidden_states,)
-
-            layer_outputs = layer_module(
-                hidden_states, attention_mask, head_mask[i], encoder_hidden_states, encoder_attention_mask, mlp_mask[i]
-            )
+            if isinstance(layer_module, nn.Linear):
+                layer_outputs = (layer_module(hidden_states), None)
+            else:
+                # we have to set head_mask & mlp_mask to None
+                layer_outputs = layer_module(
+                    hidden_states, attention_mask, None, encoder_hidden_states, encoder_attention_mask, None
+                )
             hidden_states = layer_outputs[0]
 
             if self.output_attentions:
