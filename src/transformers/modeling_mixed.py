@@ -297,13 +297,15 @@ class RandomPathModel(MixedBertForSequenceClassification):
 class MixedBert(nn.Module, ModuleUtilsMixin):
     def __init__(self, model_base, model_large, num_parts):
         super(MixedBert, self).__init__()
-        self.model_base = model_base
-        self.model_large = model_large
-        self.base_pooler = model_base.bert.pooler
-        self.large_pooler = model_large.bert.pooler
-        self.base_embeddings = model_base.bert.embeddings
-        self.large_embeddings = model_large.bert.embeddings
-        self.mixed_encoder = MixedEncoder(model_base, model_large, num_parts)
+        self.add_module("model_base", model_base)
+        self.add_module("model_large", model_large)
+        # self.model_base = model_base
+        # self.model_large = model_large
+        self.base_pooler = self.model_base.bert.pooler
+        self.large_pooler = self.model_large.bert.pooler
+        self.base_embeddings = self.model_base.bert.embeddings
+        self.large_embeddings = self.model_large.bert.embeddings
+        self.mixed_encoder = MixedEncoder(self.model_base, self.model_large, num_parts)
         self.config = model_base.config
 
     def forward(self,
@@ -428,7 +430,6 @@ class MixedEncoder(nn.Module):
                 mlp_mask=None,
                 layers=None,
                 ):
-        # move the random path logit into forward to avoid multi-gpu bug
 
         # dynamic_encoder_layers = self.get_switchable_forward()
         all_hidden_states = ()
@@ -437,6 +438,7 @@ class MixedEncoder(nn.Module):
         layers = []
         # print(self.base_parts)
         # print(len(self.base_parts))
+        # move the random path logit into forward to avoid multi-gpu bug
         for i in range(self.num_parts):
             # select between large or base blocks
             # TODO:  replace random choice with instance-level metric
