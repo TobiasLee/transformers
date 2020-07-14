@@ -361,7 +361,8 @@ class MixedBert(nn.Module, ModuleUtilsMixin):
 
         if layers[0].attention.self.query.in_features == self.model_base.config.hidden_size:
             embedding_output = self.base_embeddings(
-                input_ids=input_ids, position_ids=position_ids, token_type_ids=token_type_ids, inputs_embeds=inputs_embeds
+                input_ids=input_ids, position_ids=position_ids, token_type_ids=token_type_ids,
+                inputs_embeds=inputs_embeds
             )
         else:
             embedding_output = self.large_embeddings(
@@ -416,7 +417,8 @@ class MixedEncoder(nn.Module):
         self.output_hidden_states = self.model_base.bert.config.output_hidden_states
 
     def forward(self,
-                hidden_states,
+                base_embeddings,
+                large_embeddings,
                 attention_mask=None,
                 head_mask=None,
                 encoder_hidden_states=None,
@@ -424,6 +426,7 @@ class MixedEncoder(nn.Module):
                 mlp_mask=None,
                 layers=None,
                 ):
+        # move the random path logit into forward to avoid multi-gpu bug
 
         # dynamic_encoder_layers = self.get_switchable_forward()
         all_hidden_states = ()
@@ -455,11 +458,12 @@ class MixedEncoder(nn.Module):
             outputs = outputs + (all_attentions,)
         return outputs  # last-layer hidden state, (all hidden states), (all attentions)
 
-    def get_switchable_forward(self):  # get a switched encoder layer
+    def get_switchable_forward(self):  # get a switched encoder layer, this code cannot work under multi-gpu settings
         forward = nn.ModuleList()
         for i in range(self.num_parts):
-            #  random choice can be replaced with instance-level metric
-            selected = random.choice([self.base_parts[i], self.large_parts[i]])  # select between large or base blocks
+            # select between large or base blocks
+            # TODO:  replace random choice with instance-level metric
+            selected = random.choice([self.base_parts[i], self.large_parts[i]])
             pre_hidden = forward[-1].output.dense.out_features if len(forward) != 0 else None
             next_hidden = selected[-1].output.dense.out_features
             # add feature transformation between mismatch blocks
