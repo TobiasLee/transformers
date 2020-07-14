@@ -356,27 +356,29 @@ class MixedBert(nn.Module, ModuleUtilsMixin):
         head_mask = self.get_head_mask(head_mask, self.config.num_hidden_layers)
         if mlp_mask is None:
             mlp_mask = [None] * self.config.num_hidden_layers
+        # print(device)
+        # layers = self.mixed_encoder.get_switchable_forward()
+        # layers = [module.to(device) for module in layers]
 
-        layers = self.mixed_encoder.get_switchable_forward()
-
-        if layers[0].attention.self.query.in_features == self.model_base.config.hidden_size:
-            embedding_output = self.base_embeddings(
-                input_ids=input_ids, position_ids=position_ids, token_type_ids=token_type_ids,
-                inputs_embeds=inputs_embeds
-            )
-        else:
-            embedding_output = self.large_embeddings(
-                input_ids=input_ids, position_ids=position_ids, token_type_ids=token_type_ids,
-                inputs_embeds=inputs_embeds
-            )
+        # if layers[0].attention.self.query.in_features == self.model_base.config.hidden_size:
+        base_embedding_output = self.base_embeddings(
+            input_ids=input_ids, position_ids=position_ids, token_type_ids=token_type_ids,
+            inputs_embeds=inputs_embeds
+        )
+        # else:
+        large_embedding_output = self.large_embeddings(
+            input_ids=input_ids, position_ids=position_ids, token_type_ids=token_type_ids,
+            inputs_embeds=inputs_embeds
+        )
         encoder_outputs = self.mixed_encoder(
-            embedding_output,
+            base_embedding_output,
+            large_embedding_output,
             attention_mask=extended_attention_mask,
             head_mask=head_mask,
             encoder_hidden_states=encoder_hidden_states,
             encoder_attention_mask=encoder_extended_attention_mask,
             mlp_mask=mlp_mask,
-            layers=layers,
+            layers=None,
         )
         sequence_output = encoder_outputs[0]
         hidden_num = sequence_output.size()[-1]
@@ -431,8 +433,29 @@ class MixedEncoder(nn.Module):
         # dynamic_encoder_layers = self.get_switchable_forward()
         all_hidden_states = ()
         all_attentions = ()
+        # print('layer number for this time: %d' % len(layers))
+        layers = []
+        # print(self.base_parts)
+        # print(len(self.base_parts))
+        for i in range(self.num_parts):
+            # select between large or base blocks
+            # TODO:  replace random choice with instance-level metric
+            selected = random.choice([self.base_parts[i], self.large_parts[i]])
+            pre_hidden = layers[-1].output.dense.out_features if len(layers) != 0 else None
+            next_hidden = selected[-1].output.dense.out_features
+            # add feature transformation between mismatch blocks
+            if pre_hidden is not None and next_hidden != pre_hidden:
+                if next_hidden > pre_hidden:
+                    layers.append(self.lo2hi_layers[i])
+                else:
+                    layers.append(self.hi2lo_layers[i])
+            layers.extend(selected)
+        if layers[0].attention.self.query.in_features == self.model_base.config.hidden_size:
+            hidden_states = base_embeddings
+        else:
+            hidden_states = large_embeddings
         for i, layer_module in enumerate(layers):
-            # print(i)
+            # print(i, hidden_states.device)
             if self.output_hidden_states:
                 all_hidden_states = all_hidden_states + (hidden_states,)
             if isinstance(layer_module, nn.Linear):
@@ -458,8 +481,11 @@ class MixedEncoder(nn.Module):
             outputs = outputs + (all_attentions,)
         return outputs  # last-layer hidden state, (all hidden states), (all attentions)
 
-    def get_switchable_forward(self):  # get a switched encoder layer, this code cannot work under multi-gpu settings
-        forward = nn.ModuleList()
+    def get_switchable_forward(self):  # get a switched encoder layer, cannot work under multi-gpu setting
+        # forward = nn.ModuleList()
+        forward = []
+        # print(self.base_parts)
+        # print(len(self.base_parts))
         for i in range(self.num_parts):
             # select between large or base blocks
             # TODO:  replace random choice with instance-level metric
