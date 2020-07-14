@@ -356,9 +356,9 @@ class MixedBert(nn.Module, ModuleUtilsMixin):
         head_mask = self.get_head_mask(head_mask, self.config.num_hidden_layers)
         if mlp_mask is None:
             mlp_mask = [None] * self.config.num_hidden_layers
-
+        print(device) 
         layers = self.mixed_encoder.get_switchable_forward()
-
+        layers = [ module.to(device) for module in layers]
         if layers[0].attention.self.query.in_features == self.model_base.config.hidden_size:
             embedding_output = self.base_embeddings(
                 input_ids=input_ids, position_ids=position_ids, token_type_ids=token_type_ids, inputs_embeds=inputs_embeds
@@ -428,8 +428,10 @@ class MixedEncoder(nn.Module):
         # dynamic_encoder_layers = self.get_switchable_forward()
         all_hidden_states = ()
         all_attentions = ()
+        print('layer number for this time: %d' % len(layers))
         for i, layer_module in enumerate(layers):
             # print(i)
+            print(i,  hidden_states.device)
             if self.output_hidden_states:
                 all_hidden_states = all_hidden_states + (hidden_states,)
             if isinstance(layer_module, nn.Linear):
@@ -456,7 +458,10 @@ class MixedEncoder(nn.Module):
         return outputs  # last-layer hidden state, (all hidden states), (all attentions)
 
     def get_switchable_forward(self):  # get a switched encoder layer
-        forward = nn.ModuleList()
+        #forward = nn.ModuleList()
+        forward = [] 
+        # print(self.base_parts)
+        print(len(self.base_parts)) 
         for i in range(self.num_parts):
             #  random choice can be replaced with instance-level metric
             selected = random.choice([self.base_parts[i], self.large_parts[i]])  # select between large or base blocks
