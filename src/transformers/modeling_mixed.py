@@ -279,19 +279,23 @@ class RandomPathModel(MixedBertForSequenceClassification):
             inputs_embeds=inputs_embeds,
             # mlp_mask=mlp_mask
         )
+        last_selected_block_idx = outputs[-1][-1]  #
 
-        pooled_output = outputs[1]
-        hidden_num = pooled_output.size()[-1]
-        large_hidden = self.large_classifier.in_features if isinstance(self.large_classifier, nn.Linear) \
-            else self.large_classifier.dense.in_features
-        if hidden_num == large_hidden:
-            if self.large_dropout is not None:
+        # if hidden_num == large_hidden:
+        if self.large_dropout is not None:  # bert model
+            pooled_output = outputs[1]
+            if last_selected_block_idx == 1:
                 pooled_output = self.large_dropout(pooled_output)
-            logits = self.large_classifier(pooled_output)
-        else:
-            if self.base_dropout is not None:
+                logits = self.large_classifier(pooled_output)
+            else:
                 pooled_output = self.base_dropout(pooled_output)
-            logits = self.base_classifier(pooled_output)
+                logits = self.base_classifier(pooled_output)
+        else:  # roberta & distill-roberta model
+            sequence_output = outputs[0]
+            if last_selected_block_idx == 1:
+                logits = self.large_classifier(sequence_output)
+            else:
+                logits = self.base_classifier(sequence_output)
 
         outputs = (logits,) + outputs[2:]  # add hidden states and attention if they are here
 
@@ -464,23 +468,28 @@ class MixedEncoder(nn.Module):
         all_attentions = ()
         # print('layer number for this time: %d' % len(layers))
         layers = []
+        selected_path = []
         # print(self.base_parts)
         # print(len(self.base_parts))
         # move the random path logit into forward to avoid multi-gpu bug
         for i in range(self.num_parts):
             # select between large or base blocks
             # TODO:  replace random choice with instance-level metric
-            selected = random.choice([self.base_parts[i], self.large_parts[i]])
-            pre_hidden = layers[-1].output.dense.out_features if len(layers) != 0 else None
-            next_hidden = selected[-1].output.dense.out_features
+            selected_idx = random.choice([0, 1])  # 0:base, 1:large
+            # pre_hidden = layers[-1].output.dense.out_features if len(layers) != 0 else None
+            # next_hidden = selected[-1].output.dense.out_features
+
             # add feature transformation between mismatch blocks
-            if pre_hidden is not None and next_hidden != pre_hidden:
-                if next_hidden > pre_hidden:
+            if len(selected_path) != 0 and selected_idx != selected_path[-1]:
+                if selected_idx > selected_path[-1]:  # select a large block, previous is small, add a lo2hi transformation
                     layers.append(self.lo2hi_layers[i])
                 else:
                     layers.append(self.hi2lo_layers[i])
-            layers.extend(selected)
-        if layers[0].attention.self.query.in_features == self.model_base.config.hidden_size:
+            selected_path.append(selected_idx)
+            layers.extend(self.base_parts[i] if selected_idx == 0
+                          else self.large_parts[i])
+
+        if selected_path[0] == 0:
             hidden_states = base_embeddings
         else:
             hidden_states = large_embeddings
@@ -509,7 +518,8 @@ class MixedEncoder(nn.Module):
             outputs = outputs + (all_hidden_states,)
         if self.output_attentions:
             outputs = outputs + (all_attentions,)
-        return outputs  # last-layer hidden state, (all hidden states), (all attentions)
+        # last-layer hidden state, (all hidden states), (all attentions), (selected_path)
+        return outputs + (selected_path, )
 
     def get_switchable_forward(self):  # get a switched encoder layer, cannot work under multi-gpu setting
         # forward = nn.ModuleList()
