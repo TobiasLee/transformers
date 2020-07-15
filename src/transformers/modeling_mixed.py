@@ -411,11 +411,11 @@ class MixedEncoder(nn.Module):
         # divide into parts
         self.base_interval = self.model_base.config.num_hidden_layers // num_parts
         self.large_interval = self.model_large.config.num_hidden_layers // num_parts
-        self.base_parts = [self.model_base.bert.encoder.layer[i:i + self.base_interval]
-                           for i in range(0, self.model_base.config.num_hidden_layers, self.base_interval)]
+        self.base_parts = nn.ModuleList([self.model_base.bert.encoder.layer[i:i + self.base_interval]
+                           for i in range(0, self.model_base.config.num_hidden_layers, self.base_interval)])
 
-        self.large_parts = [self.model_large.bert.encoder.layer[i:i + self.large_interval]
-                            for i in range(0, self.model_large.config.num_hidden_layers, self.large_interval)]
+        self.large_parts = nn.ModuleList([self.model_large.bert.encoder.layer[i:i + self.large_interval]
+                            for i in range(0, self.model_large.config.num_hidden_layers, self.large_interval)])
         # configs
         self.output_attentions = self.model_base.bert.config.output_attentions
         self.output_hidden_states = self.model_base.bert.config.output_hidden_states
