@@ -282,7 +282,9 @@ class RandomPathModel(MixedBertForSequenceClassification):
 
         pooled_output = outputs[1]
         hidden_num = pooled_output.size()[-1]
-        if hidden_num == self.large_classifier.in_features:
+        large_hidden = self.large_classifier.in_features if isinstance(self.large_classifier, nn.Linear) \
+            else self.large_classifier.dense.in_features
+        if hidden_num == large_hidden:
             if self.large_dropout is not None:
                 pooled_output = self.large_dropout(pooled_output)
             logits = self.large_classifier(pooled_output)
