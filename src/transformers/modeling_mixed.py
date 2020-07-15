@@ -240,12 +240,18 @@ class MixedBertForSequenceClassification(nn.Module):
 
 
 class RandomPathModel(MixedBertForSequenceClassification):
-    def __init__(self, model_base, model_large, switch_rate=0.5, num_parts=3):
+    def __init__(self, model_base, model_large, switch_rate=0.5, num_parts=3,
+                 base_model_name='bert',
+                 large_model_name='bert'
+                 ):
         super(RandomPathModel, self).__init__(model_base, model_large, switch_rate)
         self.num_parts = num_parts
+        self.base_model_name = base_model_name
+        self.large_model_name = large_model_name
         self.output_attentions = self.model_base.config.output_attentions
         self.output_hidden_states = self.model_base.config.output_hidden_states
-        self.mixed_bert = MixedBert(model_base, model_large, num_parts)
+        self.mixed_bert = MixedBert(model_base, model_large, num_parts,
+                                    self.base_model_name, self.large_model_name)
         # final layer
         self.large_classifier = model_large.classifier
         self.base_classifier = model_base.classifier

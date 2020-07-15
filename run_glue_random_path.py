@@ -74,6 +74,14 @@ class ModelArguments:
     mode: Optional[str] = field(
         default="random", metadata={"help": "Use different mode for training or inference: [random, large, base]"}
     )
+    base_model_name: Optional[str] = field(
+        default='bert',
+        metadata={"help": "Large Model handler for underlying model in the SequenceClassification Model"}
+    )
+    large_model_name: Optional[str] = field(
+        default='bert',
+        metadata={"help": "Large Model handler for underlying model in the SequenceClassification Model"}
+    )
 
 
 def main():
@@ -170,7 +178,9 @@ def main():
         )
     else:
         model = RandomPathModel(model_base=model_base, model_large=model_large,
-                                                   switch_rate=0.5,)
+                                switch_rate=0.5,
+                                base_model_name=model_args.base_model_name,
+                                large_model_name=model_args.large_model_name)
 
     # Get datasets
     train_dataset = (
