@@ -488,7 +488,7 @@ class MixedEncoder(nn.Module):
             selected_path.append(selected_idx)
             layers.extend(self.base_parts[i] if selected_idx == 0
                           else self.large_parts[i])
-
+        selected_path = torch.tensor(selected_path, device=base_embeddings.device)
         if selected_path[0] == 0:
             hidden_states = base_embeddings
         else:
