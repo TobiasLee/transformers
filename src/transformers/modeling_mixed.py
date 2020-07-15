@@ -50,13 +50,17 @@ WEIGHTS_NAME = "pytorch_model.bin"
 class MixedBertForSequenceClassification(nn.Module):
     base_model_prefix = "bert"
 
-    def __init__(self, model_base, model_large, switch_rate=0.5, mode='random'):
+    def __init__(self, model_base, model_large, switch_rate=0.5, mode='random', config=BertConfig()):
         super().__init__()
         self.bernoulli = Bernoulli(torch.tensor([switch_rate]))
         self.model_base = model_base
         self.model_large = model_large
-        self.config = BertConfig()
+        self.config = config
         self.mode = mode
+
+    @classmethod
+    def set_prefix(cls, prefix):
+        cls.base_model_prefix = prefix
 
     def forward(
             self,
@@ -78,7 +82,7 @@ class MixedBertForSequenceClassification(nn.Module):
                     position_ids=position_ids,
                     head_mask=head_mask,
                     inputs_embeds=inputs_embeds,
-                    mlp_mask=mlp_mask,
+                    # mlp_mask=mlp_mask,
                     labels=labels
                 )
             else:
@@ -89,7 +93,7 @@ class MixedBertForSequenceClassification(nn.Module):
                     position_ids=position_ids,
                     head_mask=head_mask,
                     inputs_embeds=inputs_embeds,
-                    mlp_mask=mlp_mask,
+                    # mlp_mask=mlp_mask,
                     labels=labels
                 )
         elif self.mode == 'large':
@@ -100,7 +104,7 @@ class MixedBertForSequenceClassification(nn.Module):
                 position_ids=position_ids,
                 head_mask=head_mask,
                 inputs_embeds=inputs_embeds,
-                mlp_mask=mlp_mask,
+                # mlp_mask=mlp_mask,
                 labels=labels
             )
         elif self.mode == 'base':
@@ -111,7 +115,7 @@ class MixedBertForSequenceClassification(nn.Module):
                 position_ids=position_ids,
                 head_mask=head_mask,
                 inputs_embeds=inputs_embeds,
-                mlp_mask=mlp_mask,
+                # mlp_mask=mlp_mask,
                 labels=labels
             )
         else:
@@ -267,7 +271,7 @@ class RandomPathModel(MixedBertForSequenceClassification):
             position_ids=position_ids,
             head_mask=head_mask,
             inputs_embeds=inputs_embeds,
-            mlp_mask=mlp_mask
+            # mlp_mask=mlp_mask
         )
 
         pooled_output = outputs[1]
@@ -295,17 +299,23 @@ class RandomPathModel(MixedBertForSequenceClassification):
 
 
 class MixedBert(nn.Module, ModuleUtilsMixin):
-    def __init__(self, model_base, model_large, num_parts):
+    def __init__(self, model_base, model_large, num_parts,
+                 base_model_name='bert',
+                 large_model_name='bert'):
         super(MixedBert, self).__init__()
         self.add_module("model_base", model_base)
         self.add_module("model_large", model_large)
         # self.model_base = model_base
         # self.model_large = model_large
-        self.base_pooler = self.model_base.bert.pooler
-        self.large_pooler = self.model_large.bert.pooler
-        self.base_embeddings = self.model_base.bert.embeddings
-        self.large_embeddings = self.model_large.bert.embeddings
-        self.mixed_encoder = MixedEncoder(self.model_base, self.model_large, num_parts)
+        base_model_handler = getattr(self.model_base, base_model_name)
+        large_model_handler = getattr(self.model_large, large_model_name)
+        self.base_pooler = base_model_handler.pooler
+        self.large_pooler = large_model_handler.pooler
+        self.base_embeddings = base_model_handler.embeddings
+        self.large_embeddings = large_model_handler.embeddings
+        self.mixed_encoder = MixedEncoder(self.model_base, self.model_large, num_parts,
+                                          base_model_name,
+                                          large_model_name)
         self.config = model_base.config
 
     def forward(self,
@@ -379,7 +389,7 @@ class MixedBert(nn.Module, ModuleUtilsMixin):
             head_mask=head_mask,
             encoder_hidden_states=encoder_hidden_states,
             encoder_attention_mask=encoder_extended_attention_mask,
-            mlp_mask=mlp_mask,
+            # mlp_mask=mlp_mask,
             layers=None,
         )
         sequence_output = encoder_outputs[0]
@@ -396,7 +406,9 @@ class MixedBert(nn.Module, ModuleUtilsMixin):
 
 
 class MixedEncoder(nn.Module):
-    def __init__(self, model_base, model_large, num_parts=3):
+    def __init__(self, model_base, model_large, num_parts=3,
+                 base_model_name='bert',
+                 large_model_name='bert'):
         super(MixedEncoder, self).__init__()
         self.model_base = model_base
         self.model_large = model_large
@@ -411,14 +423,20 @@ class MixedEncoder(nn.Module):
         # divide into parts
         self.base_interval = self.model_base.config.num_hidden_layers // num_parts
         self.large_interval = self.model_large.config.num_hidden_layers // num_parts
-        self.base_parts = nn.ModuleList([self.model_base.bert.encoder.layer[i:i + self.base_interval]
-                           for i in range(0, self.model_base.config.num_hidden_layers, self.base_interval)])
+        # a ref to the underlying model: e.g. bert/roberta/distilroberata
+        base_model_handler = getattr(self.model_base, base_model_name)
+        large_model_handler = getattr(self.model_large, large_model_name)
 
-        self.large_parts = nn.ModuleList([self.model_large.bert.encoder.layer[i:i + self.large_interval]
-                            for i in range(0, self.model_large.config.num_hidden_layers, self.large_interval)])
+        self.base_parts = nn.ModuleList([base_model_handler.encoder.layer[i:i + self.base_interval]
+                                         for i in
+                                         range(0, self.model_base.config.num_hidden_layers, self.base_interval)])
+
+        self.large_parts = nn.ModuleList([large_model_handler.encoder.layer[i:i + self.large_interval]
+                                          for i in
+                                          range(0, self.model_large.config.num_hidden_layers, self.large_interval)])
         # configs
-        self.output_attentions = self.model_base.bert.config.output_attentions
-        self.output_hidden_states = self.model_base.bert.config.output_hidden_states
+        self.output_attentions = base_model_handler.config.output_attentions
+        self.output_hidden_states = large_model_handler.config.output_hidden_states
 
     def forward(self,
                 base_embeddings,
@@ -465,7 +483,7 @@ class MixedEncoder(nn.Module):
             else:
                 # we have to set head_mask & mlp_mask to None
                 layer_outputs = layer_module(
-                    hidden_states, attention_mask, None, encoder_hidden_states, encoder_attention_mask, None
+                    hidden_states, attention_mask, None, encoder_hidden_states, encoder_attention_mask  # , None
                 )
             hidden_states = layer_outputs[0]
 
