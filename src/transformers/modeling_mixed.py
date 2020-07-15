@@ -457,7 +457,7 @@ class MixedEncoder(nn.Module):
         else:
             hidden_states = large_embeddings
         for i, layer_module in enumerate(layers):
-            # print(i, hidden_states.device)
+            # print(i, hidden_states.device, next(layer_module.parameters()).device)
             if self.output_hidden_states:
                 all_hidden_states = all_hidden_states + (hidden_states,)
             if isinstance(layer_module, nn.Linear):
