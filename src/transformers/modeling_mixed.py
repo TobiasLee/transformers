@@ -255,8 +255,8 @@ class RandomPathModel(MixedBertForSequenceClassification):
         # final layer
         self.large_classifier = model_large.classifier
         self.base_classifier = model_base.classifier
-        self.base_dropout = self.model_base.dropout
-        self.large_dropout = self.model_large.dropout
+        self.base_dropout = getattr(self.model_base, 'dropout', None)
+        self.large_dropout = getattr(self.model_large, 'dropout', None)
 
     def forward(
             self,
@@ -283,10 +283,12 @@ class RandomPathModel(MixedBertForSequenceClassification):
         pooled_output = outputs[1]
         hidden_num = pooled_output.size()[-1]
         if hidden_num == self.large_classifier.in_features:
-            pooled_output = self.large_dropout(pooled_output)
+            if self.large_dropout is not None:
+                pooled_output = self.large_dropout(pooled_output)
             logits = self.large_classifier(pooled_output)
         else:
-            pooled_output = self.base_dropout(pooled_output)
+            if self.base_dropout is not None:
+                pooled_output = self.base_dropout(pooled_output)
             logits = self.base_classifier(pooled_output)
 
         outputs = (logits,) + outputs[2:]  # add hidden states and attention if they are here
