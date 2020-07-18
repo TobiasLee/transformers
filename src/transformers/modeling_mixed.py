@@ -279,7 +279,7 @@ class RandomPathModel(MixedBertForSequenceClassification):
             inputs_embeds=inputs_embeds,
             # mlp_mask=mlp_mask
         )
-        last_selected_block_idx = outputs[-1][-1]  #
+        last_selected_block_idx = outputs[-1][-1]  # selected idx
 
         # if hidden_num == large_hidden:
         if self.large_dropout is not None:  # bert model
@@ -476,18 +476,19 @@ class MixedEncoder(nn.Module):
             # select between large or base blocks
             # TODO:  replace random choice with instance-level metric
             selected_idx = random.choice([0, 1])  # 0:base, 1:large
-            # pre_hidden = layers[-1].output.dense.out_features if len(layers) != 0 else None
-            # next_hidden = selected[-1].output.dense.out_features
 
             # add feature transformation between mismatch blocks
             if len(selected_path) != 0 and selected_idx != selected_path[-1]:
-                if selected_idx > selected_path[-1]:  # select a large block, previous is small, add a lo2hi transformation
+                # select a large block if previous is small, add a lo2hi transformation
+                if selected_idx > selected_path[-1]:
                     layers.append(self.lo2hi_layers[i])
                 else:
                     layers.append(self.hi2lo_layers[i])
+
             selected_path.append(selected_idx)
             layers.extend(self.base_parts[i] if selected_idx == 0
                           else self.large_parts[i])
+
         selected_path = torch.tensor(selected_path, device=base_embeddings.device)
         if selected_path[0] == 0:
             hidden_states = base_embeddings
@@ -519,7 +520,7 @@ class MixedEncoder(nn.Module):
         if self.output_attentions:
             outputs = outputs + (all_attentions,)
         # last-layer hidden state, (all hidden states), (all attentions), (selected_path)
-        return outputs + (selected_path, )
+        return outputs + (selected_path,)
 
     def get_switchable_forward(self):  # get a switched encoder layer, cannot work under multi-gpu setting
         # forward = nn.ModuleList()
@@ -540,6 +541,295 @@ class MixedEncoder(nn.Module):
                     forward.append(self.hi2lo_layers[i])
             forward.extend(selected)
         return forward  # return a mixed forward encoder
+
+
+class Classifier(nn.Module):
+    def __init__(self, config):
+        super(Classifier, self).__init__()
+        self.pooler = BertPooler(config)
+        self.dropout = nn.Dropout(config.hidden_dropout_prob)
+        self.classifier = nn.Linear(config.hidden_size, config.num_labels)
+
+    def forward(self, encoder_outputs):
+        sequence_output = encoder_outputs[0]
+        # Pooler
+        pooler_input = sequence_output
+        pooler_output = self.pooler(pooler_input)  # can use multiple-pooler ?
+        # "return" pooler_output
+
+        # BertModel
+        bmodel_output = (sequence_output, pooler_output) + encoder_outputs[1:]
+
+        # Dropout and classification
+        pooled_output = bmodel_output[1]
+
+        pooled_output = self.dropout(pooled_output)
+        logits = self.classifier(pooled_output)
+
+        return logits, pooled_output
+
+
+class BranchyBert(MixedBert):
+    def __init__(self, model_base, model_large, num_parts,
+                 base_model_name='bert',
+                 large_model_name='bert',
+                 entropy_lo_threshold=0.5,
+                 entropy_hi_threshold=1.0):
+        super(BranchyBert, self).__init__(model_base, model_large, num_parts,
+                                          base_model_name,
+                                          large_model_name)
+        self.num_parts = num_parts
+        self.base_early_classifiers = nn.ModuleList([
+            Classifier(model_base.config) for _ in range(num_parts)
+        ])
+        self.large_early_classifiers = nn.ModuleList([
+            Classifier(model_large.config) for _ in range(num_parts)
+        ])
+        self.entropy_lo_threshold = entropy_lo_threshold
+        self.entropy_hi_threshold = entropy_hi_threshold
+
+    def forward(self,
+                input_ids=None,
+                attention_mask=None,
+                token_type_ids=None,
+                position_ids=None,
+                head_mask=None,
+                inputs_embeds=None,
+                encoder_hidden_states=None,
+                encoder_attention_mask=None,
+                mlp_mask=None
+                ):
+        if input_ids is not None and inputs_embeds is not None:
+            raise ValueError("You cannot specify both input_ids and inputs_embeds at the same time")
+        elif input_ids is not None:
+            input_shape = input_ids.size()
+        elif inputs_embeds is not None:
+            input_shape = inputs_embeds.size()[:-1]
+        else:
+            raise ValueError("You have to specify either input_ids or inputs_embeds")
+
+        device = input_ids.device if input_ids is not None else inputs_embeds.device
+
+        if attention_mask is None:
+            attention_mask = torch.ones(input_shape, device=device)
+        if token_type_ids is None:
+            token_type_ids = torch.zeros(input_shape, dtype=torch.long, device=device)
+
+        extended_attention_mask: torch.Tensor = self.get_extended_attention_mask(attention_mask, input_shape, device)
+
+        if self.config.is_decoder and encoder_hidden_states is not None:
+            encoder_batch_size, encoder_sequence_length, _ = encoder_hidden_states.size()
+            encoder_hidden_shape = (encoder_batch_size, encoder_sequence_length)
+            if encoder_attention_mask is None:
+                encoder_attention_mask = torch.ones(encoder_hidden_shape, device=device)
+            encoder_extended_attention_mask = self.invert_attention_mask(encoder_attention_mask)
+        else:
+            encoder_extended_attention_mask = None
+
+        # Prepare head mask if needed
+        # 1.0 in head_mask indicate we keep the head
+        # attention_probs has shape bsz x n_heads x N x N
+        # input head_mask has shape [num_heads] or [num_hidden_layers x num_heads]
+        # and head_mask is converted to shape [num_hidden_layers x batch x num_heads x seq_length x seq_length]
+        head_mask = self.get_head_mask(head_mask, self.config.num_hidden_layers)
+        if mlp_mask is None:
+            mlp_mask = [None] * self.config.num_hidden_layers
+
+        base_embedding_output = self.base_embeddings(
+            input_ids=input_ids, position_ids=position_ids, token_type_ids=token_type_ids,
+            inputs_embeds=inputs_embeds
+        )
+        # else:
+        large_embedding_output = self.large_embeddings(
+            input_ids=input_ids, position_ids=position_ids, token_type_ids=token_type_ids,
+            inputs_embeds=inputs_embeds
+        )
+
+        # dynamic logic
+        all_hidden_states = ()
+        all_attentions = ()
+
+        def _entropy(x):
+            # TODO: check for shape match
+            # x: torch.Tensor, logits BEFORE softmax
+            exp_x = torch.exp(x)
+            A = torch.sum(exp_x, dim=1)  # sum of exp(x_i)
+            B = torch.sum(x * exp_x, dim=1)  # sum of x_i * exp(x_i)
+            return torch.log(A) - B / A
+
+        def _run_sub_blocks(layer_hidden_states, layers):
+            for layer in layers:
+                layer_output = layer(layer_hidden_states, extended_attention_mask, None, encoder_hidden_states,
+                                     encoder_extended_attention_mask)
+                layer_hidden_states = layer_output[0]
+            return layer_hidden_states, layer_output
+
+        # how to decide with embedding to use ?
+        # instance-wise
+        selected_path = []
+        bsz = input_shape[0]
+        base_hidden_states = base_embedding_output
+        large_hidden_states = large_embedding_output
+        idx = torch.arange(bsz)
+        base_idx = torch.arange(bsz)
+        large_idx = torch.arange(bsz)
+        logits = []
+        for i in range(self.num_parts):
+            # select between large & small path according to classifier entropy
+            if i == 0:
+                # randomly selected the first layer
+                path = torch.randint(2, size=(bsz,))
+                base_input = base_embedding_output[path == 0]
+                large_input = large_embedding_output[path == 1]
+
+                base_hidden_states, base_layer_outputs = _run_sub_blocks(base_input,
+                                                                         self.mixed_encoder.base_parts[idx])
+                large_hidden_states, large_layer_outputs = _run_sub_blocks(large_input,
+                                                                           self.mixed_encoder.large_parts[idx])
+                base_idx = idx[path == 0]
+                large_idx = idx[path == 1]
+                selected_path.append(path)
+
+            else:
+                base_logits = self.base_early_classifiers[idx](base_hidden_states)
+                large_logits = self.large_early_classifiers[idx](large_hidden_states)
+
+                total_logits = torch.cat((base_logits, large_logits), dim=0)
+                _, order = torch.sort(torch.cat((base_idx, large_idx), dim=0))
+                ordered_logits = total_logits[order]
+                logits.append(ordered_logits)  # save classifier for training
+
+                # Switch Logic
+                # compute entropy
+                base_ent = _entropy(base_logits)
+                large_ent = _entropy(large_logits)
+
+                # bool indicator
+                still_base_entry = base_ent < self.entropy_lo_threshold
+                still_large_entry = large_ent >= self.entropy_lo_threshold
+                base2large_entry = base_ent >= self.entropy_lo_threshold
+                large2base_entry = large_ent < self.entropy_lo_threshold
+
+                still_base_idx = base_idx[still_base_entry]
+                still_large_idx = large_idx[still_large_entry]
+
+                base2large_idx = base_idx[base2large_entry]
+                large2base_idx = large_idx[large2base_entry]
+
+                large2base_hiddens = self.mixed_encoder.hi2lo_layers[idx](
+                    large_hidden_states[large2base_entry]
+                )
+                base2large_hiddens = self.mixed_encoder.lo2hi_layers[idx](
+                    base_hidden_states[base2large_entry]
+                )
+
+                base_hidden_states = torch.cat((
+                    base_hidden_states[still_base_entry], large2base_hiddens
+                ), dim=0)
+                base_idx = torch.cat((still_base_idx, large2base_idx), dim=0)
+
+                large_hidden_states = torch.cat((
+                    large_hidden_states[still_large_entry], base2large_hiddens
+                ), dim=0)
+                large_idx = torch.cat((still_large_idx, base2large_idx), dim=0)
+
+                base_hidden_states, base_layer_outputs = _run_sub_blocks(base_hidden_states,
+                                                                         self.mixed_encoder.base_parts[idx])
+                large_hidden_states, large_layer_outputs = _run_sub_blocks(large_hidden_states,
+                                                                           self.mixed_encoder.large_parts[idx])
+            if self.output_hidden_states:
+                all_hidden_states = all_hidden_states + (
+                    (base_hidden_states, large_hidden_states),)  # emit for the first hidden states?
+            if self.output_attentions:
+                all_attentions = all_attentions + ((base_layer_outputs[1], large_layer_outputs[1]),)
+
+        outputs = ((base_hidden_states, base_idx, large_hidden_states, large_idx),)
+
+        if self.output_hidden_states:
+            outputs = outputs + (all_hidden_states,)
+        if self.output_attentions:
+            outputs = outputs + (all_attentions,)
+        outputs = outputs + (logits, )
+        return outputs  # last-layer hidden state, (all hidden states), (all attentions), (IC_logits), (selected_path)
+
+
+class BranchyModel(MixedBertForSequenceClassification):
+    def __init__(self, model_base, model_large, switch_rate=0.5, num_parts=3,
+                 base_model_name='bert',
+                 large_model_name='bert',
+                 entropy_threshold=0.5
+                 ):
+        super(BranchyModel, self).__init__(model_base, model_large)
+        self.base_model_name = base_model_name
+        self.large_model_name = large_model_name
+        self.output_attentions = self.model_base.config.output_attentions
+        self.output_hidden_states = self.model_base.config.output_hidden_states
+        self.branchy_bert = BranchyBert(model_base, model_large, num_parts,
+                                        self.base_model_name, self.large_model_name,
+                                        entropy_lo_threshold=entropy_threshold)
+        # final layer
+        self.large_classifier = model_large.classifier
+        self.base_classifier = model_base.classifier
+        self.base_dropout = getattr(self.model_base, 'dropout', None)
+        self.large_dropout = getattr(self.model_large, 'dropout', None)
+
+    def forward(
+            self,
+            input_ids=None,
+            attention_mask=None,
+            token_type_ids=None,
+            position_ids=None,
+            head_mask=None,
+            inputs_embeds=None,
+            labels=None,
+            mlp_mask=None
+    ):
+        outputs = self.branchy_bert(
+            input_ids,
+            attention_mask=attention_mask,
+            token_type_ids=token_type_ids,
+            position_ids=position_ids,
+            head_mask=head_mask,
+            inputs_embeds=inputs_embeds,
+        )
+
+        base_hidden_states, base_idx, large_hidden_states, large_idx = outputs[0]
+        internal_classifier_logits = outputs[-1]
+        if self.large_dropout is not None:  # bert model, pooling logic
+            base_pooled = self.branchy_bert.base_pooler(base_hidden_states)
+            large_pooled = self.branchy_bert.large_pooler(large_hidden_states)
+            base_pooled = self.base_dropout(base_pooled)
+            large_pooled = self.large_dropout(large_pooled)
+            large_logits = self.large_classifier(base_pooled)
+            base_logits = self.base_classifier(large_pooled)
+
+        else:  # roberta & distill-roberta model
+            large_logits = self.large_classifier(large_hidden_states)
+            base_logits = self.base_classifier(base_hidden_states)
+
+        # concat
+        logits = torch.cat((base_logits, large_logits), dim=0)
+        idx = torch.cat((base_idx, large_idx), dim=0)
+        _, order = torch.sort(idx)
+        logits = logits[order]  # order it back
+
+        if labels is not None:
+            if self.model_base.num_labels == 1:
+                #  We are doing regression
+                loss_fct = MSELoss()
+                loss = loss_fct(logits.view(-1), labels.view(-1))
+
+            else:
+                loss_fct = CrossEntropyLoss()
+                loss = loss_fct(logits.view(-1, self.model_base.num_labels), labels.view(-1))
+
+            # this kd can be unsupervised
+            kd_loss = MSELoss()
+            for internal_logit in internal_classifier_logits:
+                loss += kd_loss(internal_logit.view(-1), logits.view(-1))  # teacher MSE loss for knowledge kd
+            outputs = (loss,) + outputs
+
+        return outputs  # (loss), logits, (hidden_states), (attentions)
 
 
 if __name__ == '__main__':
