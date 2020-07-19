@@ -550,24 +550,13 @@ class Classifier(nn.Module):
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
         self.classifier = nn.Linear(config.hidden_size, config.num_labels)
 
-    def forward(self, encoder_outputs):
-        sequence_output = encoder_outputs[0]
+    def forward(self, hidden_states):
         # Pooler
-        pooler_input = sequence_output
-        pooler_output = self.pooler(pooler_input)  # can use multiple-pooler ?
-        # "return" pooler_output
-
-        # BertModel
-        bmodel_output = (sequence_output, pooler_output) + encoder_outputs[1:]
-
-        # Dropout and classification
-        pooled_output = bmodel_output[1]
-
-        pooled_output = self.dropout(pooled_output)
+        pooler_output = self.pooler(hidden_states)  # can use multiple-pooler ?
+        pooled_output = self.dropout(pooler_output)
         logits = self.classifier(pooled_output)
 
-        return logits, pooled_output
-
+        return logits
 
 class BranchyBert(MixedBert):
     def __init__(self, model_base, model_large, num_parts,
@@ -587,7 +576,8 @@ class BranchyBert(MixedBert):
         ])
         self.entropy_lo_threshold = entropy_lo_threshold
         self.entropy_hi_threshold = entropy_hi_threshold
-
+        self.output_attentions = self.model_base.config.output_attentions
+        self.output_hidden_states = self.model_base.config.output_hidden_states
     def forward(self,
                 input_ids=None,
                 attention_mask=None,
@@ -657,9 +647,9 @@ class BranchyBert(MixedBert):
             B = torch.sum(x * exp_x, dim=1)  # sum of x_i * exp(x_i)
             return torch.log(A) - B / A
 
-        def _run_sub_blocks(layer_hidden_states, layers):
+        def _run_sub_blocks(layer_hidden_states, layers, idx):
             for layer in layers:
-                layer_output = layer(layer_hidden_states, extended_attention_mask, None, encoder_hidden_states,
+                layer_output = layer(layer_hidden_states, extended_attention_mask[idx], None, encoder_hidden_states,
                                      encoder_extended_attention_mask)
                 layer_hidden_states = layer_output[0]
             return layer_hidden_states, layer_output
@@ -675,24 +665,27 @@ class BranchyBert(MixedBert):
         large_idx = torch.arange(bsz)
         logits = []
         for i in range(self.num_parts):
+            print(i)
             # select between large & small path according to classifier entropy
             if i == 0:
                 # randomly selected the first layer
                 path = torch.randint(2, size=(bsz,))
                 base_input = base_embedding_output[path == 0]
                 large_input = large_embedding_output[path == 1]
-
-                base_hidden_states, base_layer_outputs = _run_sub_blocks(base_input,
-                                                                         self.mixed_encoder.base_parts[idx])
-                large_hidden_states, large_layer_outputs = _run_sub_blocks(large_input,
-                                                                           self.mixed_encoder.large_parts[idx])
                 base_idx = idx[path == 0]
                 large_idx = idx[path == 1]
+                base_hidden_states, base_layer_outputs = _run_sub_blocks(base_input,
+                                                                         self.mixed_encoder.base_parts[i],
+                                                                         base_idx)
+                large_hidden_states, large_layer_outputs = _run_sub_blocks(large_input,
+                                                                           self.mixed_encoder.large_parts[i],
+                                                                           large_idx)
+
                 selected_path.append(path)
 
             else:
-                base_logits = self.base_early_classifiers[idx](base_hidden_states)
-                large_logits = self.large_early_classifiers[idx](large_hidden_states)
+                base_logits = self.base_early_classifiers[i](base_hidden_states)
+                large_logits = self.large_early_classifiers[i](large_hidden_states)
 
                 total_logits = torch.cat((base_logits, large_logits), dim=0)
                 _, order = torch.sort(torch.cat((base_idx, large_idx), dim=0))
@@ -716,10 +709,10 @@ class BranchyBert(MixedBert):
                 base2large_idx = base_idx[base2large_entry]
                 large2base_idx = large_idx[large2base_entry]
 
-                large2base_hiddens = self.mixed_encoder.hi2lo_layers[idx](
+                large2base_hiddens = self.mixed_encoder.hi2lo_layers[i](
                     large_hidden_states[large2base_entry]
                 )
-                base2large_hiddens = self.mixed_encoder.lo2hi_layers[idx](
+                base2large_hiddens = self.mixed_encoder.lo2hi_layers[i](
                     base_hidden_states[base2large_entry]
                 )
 
@@ -734,9 +727,11 @@ class BranchyBert(MixedBert):
                 large_idx = torch.cat((still_large_idx, base2large_idx), dim=0)
 
                 base_hidden_states, base_layer_outputs = _run_sub_blocks(base_hidden_states,
-                                                                         self.mixed_encoder.base_parts[idx])
+                                                                         self.mixed_encoder.base_parts[i],
+                                                                         base_idx)
                 large_hidden_states, large_layer_outputs = _run_sub_blocks(large_hidden_states,
-                                                                           self.mixed_encoder.large_parts[idx])
+                                                                           self.mixed_encoder.large_parts[i],
+                                                                           large_idx)
             if self.output_hidden_states:
                 all_hidden_states = all_hidden_states + (
                     (base_hidden_states, large_hidden_states),)  # emit for the first hidden states?
