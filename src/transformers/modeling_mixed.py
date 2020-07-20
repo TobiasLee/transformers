@@ -648,7 +648,8 @@ class BranchyBert(MixedBert):
             return torch.log(A) - B / A
 
         def _run_sub_blocks(layer_hidden_states, layers, idx):
-            for layer in layers:
+            for i, layer in enumerate(layers):
+                # print('layer :%d' %i )
                 layer_output = layer(layer_hidden_states, extended_attention_mask[idx], None, encoder_hidden_states,
                                      encoder_extended_attention_mask)
                 layer_hidden_states = layer_output[0]
@@ -665,7 +666,7 @@ class BranchyBert(MixedBert):
         large_idx = torch.arange(bsz)
         logits = []
         for i in range(self.num_parts):
-            print(i)
+            # print('num parts :%d ' % i)
             # select between large & small path according to classifier entropy
             if i == 0:
                 # randomly selected the first layer
@@ -696,7 +697,8 @@ class BranchyBert(MixedBert):
                 # compute entropy
                 base_ent = _entropy(base_logits)
                 large_ent = _entropy(large_logits)
-
+                #print("base entropy size:", base_ent.size()[0])
+                # print("large entropy size:", large_ent.size()[0])
                 # bool indicator
                 still_base_entry = base_ent < self.entropy_lo_threshold
                 still_large_entry = large_ent >= self.entropy_lo_threshold
@@ -725,13 +727,16 @@ class BranchyBert(MixedBert):
                     large_hidden_states[still_large_entry], base2large_hiddens
                 ), dim=0)
                 large_idx = torch.cat((still_large_idx, base2large_idx), dim=0)
-
+                
+                # print('bp1')
                 base_hidden_states, base_layer_outputs = _run_sub_blocks(base_hidden_states,
                                                                          self.mixed_encoder.base_parts[i],
                                                                          base_idx)
+                #print('bp2')
                 large_hidden_states, large_layer_outputs = _run_sub_blocks(large_hidden_states,
                                                                            self.mixed_encoder.large_parts[i],
                                                                            large_idx)
+                # print('bp3')
             if self.output_hidden_states:
                 all_hidden_states = all_hidden_states + (
                     (base_hidden_states, large_hidden_states),)  # emit for the first hidden states?
@@ -807,6 +812,7 @@ class BranchyModel(MixedBertForSequenceClassification):
         idx = torch.cat((base_idx, large_idx), dim=0)
         _, order = torch.sort(idx)
         logits = logits[order]  # order it back
+        outputs = (logits,) + outputs[2:]  # add hidden states and attention if they are here
 
         if labels is not None:
             if self.model_base.num_labels == 1:
