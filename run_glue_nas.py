@@ -59,11 +59,11 @@ class ModelArguments:
     mode: Optional[str] = field(
         default="random", metadata={"help": "Use different mode for training or inference: [random, large, base]"}
     )
-    base_model_name: Optional[str] = field(
+    base_model_handler: Optional[str] = field(
         default='bert',
         metadata={"help": "Large Model handler for underlying model in the SequenceClassification Model"}
     )
-    large_model_name: Optional[str] = field(
+    large_model_handler: Optional[str] = field(
         default='bert',
         metadata={"help": "Large Model handler for underlying model in the SequenceClassification Model"}
     )
@@ -169,8 +169,8 @@ def main():
     else:
         model = BranchyModel(model_base=model_base, model_large=model_large,
                              switch_rate=0.5,
-                             base_model_name=model_args.base_model_name,
-                             large_model_name=model_args.large_model_name,
+                             base_model_name=model_args.base_model_handler,
+                             large_model_name=model_args.large_model_handler,
                              entropy_threshold=model_args.entropy_threshold)
 
     # Get datasets
