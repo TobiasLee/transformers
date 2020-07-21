@@ -558,6 +558,7 @@ class Classifier(nn.Module):
 
         return logits
 
+
 class BranchyBert(MixedBert):
     def __init__(self, model_base, model_large, num_parts,
                  base_model_name='bert',
@@ -578,6 +579,7 @@ class BranchyBert(MixedBert):
         self.entropy_hi_threshold = entropy_hi_threshold
         self.output_attentions = self.model_base.config.output_attentions
         self.output_hidden_states = self.model_base.config.output_hidden_states
+
     def forward(self,
                 input_ids=None,
                 attention_mask=None,
@@ -697,7 +699,7 @@ class BranchyBert(MixedBert):
                 # compute entropy
                 base_ent = _entropy(base_logits)
                 large_ent = _entropy(large_logits)
-                #print("base entropy size:", base_ent.size()[0])
+                # print("base entropy size:", base_ent.size()[0])
                 # print("large entropy size:", large_ent.size()[0])
                 # bool indicator
                 still_base_entry = base_ent < self.entropy_lo_threshold
@@ -727,12 +729,12 @@ class BranchyBert(MixedBert):
                     large_hidden_states[still_large_entry], base2large_hiddens
                 ), dim=0)
                 large_idx = torch.cat((still_large_idx, base2large_idx), dim=0)
-                
+
                 # print('bp1')
                 base_hidden_states, base_layer_outputs = _run_sub_blocks(base_hidden_states,
                                                                          self.mixed_encoder.base_parts[i],
                                                                          base_idx)
-                #print('bp2')
+                # print('bp2')
                 large_hidden_states, large_layer_outputs = _run_sub_blocks(large_hidden_states,
                                                                            self.mixed_encoder.large_parts[i],
                                                                            large_idx)
@@ -749,7 +751,7 @@ class BranchyBert(MixedBert):
             outputs = outputs + (all_hidden_states,)
         if self.output_attentions:
             outputs = outputs + (all_attentions,)
-        outputs = outputs + (logits, )
+        outputs = outputs + (logits,)
         return outputs  # last-layer hidden state, (all hidden states), (all attentions), (IC_logits), (selected_path)
 
 
@@ -827,7 +829,7 @@ class BranchyModel(MixedBertForSequenceClassification):
             # this kd can be unsupervised
             kd_loss = MSELoss()
             for internal_logit in internal_classifier_logits:
-                loss += kd_loss(internal_logit.view(-1), logits.view(-1))  # teacher MSE loss for knowledge kd
+                loss += kd_loss(internal_logit.view(-1), logits.view(-1))  # teacher MSE loss for knowledge distillation
             outputs = (loss,) + outputs
 
         return outputs  # (loss), logits, (hidden_states), (attentions)
