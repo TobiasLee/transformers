@@ -39,8 +39,15 @@ class ModelArguments:
     large_model_name_or_path: str = field(
         metadata={"help": "Path to pretrained base model or model identifier from huggingface.co/models"}
     )
+
     mixed_model_name_or_path: str = field(
         metadata={"help": "Path to pretrained base model or model identifier from huggingface.co/models"}
+    )
+    freeze_trained_models: bool = field(
+        default=False,
+        metadata={
+            "help":
+            "Freeze fine-tuned base and large models"},
     )
     config_name: Optional[str] = field(
         default=None, metadata={"help": "Pretrained config name or path if not the same as model_name"}
@@ -162,6 +169,13 @@ def main():
         config=config_large,
         cache_dir=model_args.cache_dir,
     )
+
+    if model_args.freeze_trained_models:
+        for param in model_base.bert.parameters():
+            param.requires_grad = False
+        for param in model_large.bert.parameters():
+            param.requires_grad = False
+
     if model_args.saved_path is not None:
         model = BranchyModel.from_pretrained(
             path=model_args.saved_path, model_base=model_base, model_large=model_large,
