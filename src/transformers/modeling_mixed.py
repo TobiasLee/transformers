@@ -148,7 +148,7 @@ class MixedBertForSequenceClassification(nn.Module):
         logger.info("Model weights saved in {}".format(output_model_file))
 
     @classmethod
-    def from_pretrained(cls, path, model_base, model_large, mode='random'):
+    def from_pretrained(cls, path, model_base, model_large, mode='random', **kwargs):
         archive_file = os.path.join(path, WEIGHTS_NAME)
 
         try:
@@ -158,7 +158,7 @@ class MixedBertForSequenceClassification(nn.Module):
                 "Unable to load weights from pytorch checkpoint file. "
                 "If you tried to load a PyTorch model from a TF 2.0 checkpoint, please set from_tf=True. "
             )
-        model = cls(model_base, model_large)
+        model = cls(model_base, model_large, **kwargs)
 
         missing_keys = []
         unexpected_keys = []

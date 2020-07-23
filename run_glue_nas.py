@@ -185,6 +185,11 @@ def main():
     if model_args.saved_path is not None:
         model = BranchyModel.from_pretrained(
             path=model_args.saved_path, model_base=model_base, model_large=model_large,
+            switch_rate=0.5,
+            base_model_name=model_args.base_model_handler,
+            large_model_name=model_args.large_model_handler,
+            entropy_threshold=model_args.entropy_threshold,
+            switch_pattern_idx=model_args.switch_pattern_idx
         )
     else:
         if model_args.switch_pattern_idx != -1:
