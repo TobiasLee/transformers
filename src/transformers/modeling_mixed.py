@@ -589,7 +589,8 @@ class BranchyBert(MixedBert):
                 inputs_embeds=None,
                 encoder_hidden_states=None,
                 encoder_attention_mask=None,
-                mlp_mask=None
+                mlp_mask=None,
+                switch_pattern_idx=-1
                 ):
         if input_ids is not None and inputs_embeds is not None:
             raise ValueError("You cannot specify both input_ids and inputs_embeds at the same time")
@@ -667,6 +668,46 @@ class BranchyBert(MixedBert):
         base_idx = torch.arange(bsz)
         large_idx = torch.arange(bsz)
         logits = []
+        last_block = -1
+        if switch_pattern_idx != -1:
+            for i in range(self.num_parts):
+
+                if switch_pattern_idx % 2 == 1:  # switch to large
+                    if last_block == -1:  # first block
+                        hidden_states = large_embedding_output
+                    elif last_block == 0:  # last block is small, run the TL
+                        hidden_states = self.mixed_encoder.lo2hi_layers[i](hidden_states)
+                    large_idx = torch.arange(bsz) > -1  # all true
+                    hidden_states, layer_outputs = _run_sub_blocks(hidden_states,
+                                                                   self.mixed_encoder.large_parts[i],
+                                                                   large_idx)
+                    last_block = 1
+                else:  # switch to base blocks
+                    if last_block == -1:
+                        hidden_states = base_embedding_output
+                    elif last_block == 1:  # last block is large, run the
+                        hidden_states = self.mixed_encoder.hi2lo_layers[i](hidden_states)
+
+                    base_idx = torch.arange(bsz) > -1  # all true
+                    hidden_states, layer_outputs = _run_sub_blocks(hidden_states,
+                                                                   self.mixed_encoder.base_parts[i],
+                                                                   base_idx)
+                    last_block = 0
+
+                switch_pattern_idx //= 2
+                if self.output_hidden_states:
+                    all_hidden_states = all_hidden_states + (
+                        hidden_states,)  # emit for the first hidden states?
+                if self.output_attentions:
+                    all_attentions = all_attentions + (layer_outputs[1],)
+            outputs = (hidden_states,)
+            if self.output_hidden_states:
+                outputs = outputs + (all_hidden_states,)
+            if self.output_attentions:
+                outputs = outputs + (all_attentions,)
+
+            return outputs
+
         for i in range(self.num_parts):
             # print('num parts :%d ' % i)
             # select between large & small path according to classifier entropy
@@ -730,15 +771,12 @@ class BranchyBert(MixedBert):
                 ), dim=0)
                 large_idx = torch.cat((still_large_idx, base2large_idx), dim=0)
 
-                # print('bp1')
                 base_hidden_states, base_layer_outputs = _run_sub_blocks(base_hidden_states,
                                                                          self.mixed_encoder.base_parts[i],
                                                                          base_idx)
-                # print('bp2')
                 large_hidden_states, large_layer_outputs = _run_sub_blocks(large_hidden_states,
                                                                            self.mixed_encoder.large_parts[i],
                                                                            large_idx)
-                # print('bp3')
             if self.output_hidden_states:
                 all_hidden_states = all_hidden_states + (
                     (base_hidden_states, large_hidden_states),)  # emit for the first hidden states?
@@ -759,7 +797,8 @@ class BranchyModel(MixedBertForSequenceClassification):
     def __init__(self, model_base, model_large, switch_rate=0.5, num_parts=3,
                  base_model_name='bert',
                  large_model_name='bert',
-                 entropy_threshold=0.5
+                 entropy_threshold=0.5,
+                 switch_pattern_idx=-1
                  ):
         super(BranchyModel, self).__init__(model_base, model_large)
         self.base_model_name = base_model_name
@@ -769,11 +808,13 @@ class BranchyModel(MixedBertForSequenceClassification):
         self.branchy_bert = BranchyBert(model_base, model_large, num_parts,
                                         self.base_model_name, self.large_model_name,
                                         entropy_lo_threshold=entropy_threshold)
+        self.num_parts = num_parts
         # final layer
         self.large_classifier = model_large.classifier
         self.base_classifier = model_base.classifier
         self.base_dropout = getattr(self.model_base, 'dropout', None)
         self.large_dropout = getattr(self.model_large, 'dropout', None)
+        self.switch_pattern_idx = switch_pattern_idx
 
     def forward(
             self,
@@ -784,7 +825,7 @@ class BranchyModel(MixedBertForSequenceClassification):
             head_mask=None,
             inputs_embeds=None,
             labels=None,
-            mlp_mask=None
+            mlp_mask=None,
     ):
         outputs = self.branchy_bert(
             input_ids,
@@ -793,27 +834,46 @@ class BranchyModel(MixedBertForSequenceClassification):
             position_ids=position_ids,
             head_mask=head_mask,
             inputs_embeds=inputs_embeds,
+            switch_pattern_idx=self.switch_pattern_idx
         )
+        internal_classifier_logits = None
+        if self.switch_pattern_idx != -1:  # fix pattern
+            hidden_states = outputs[0]
+            pattern_idx = self.switch_pattern_idx
+            for _ in self.num_parts:
+                pattern_idx //= 2  #
+            if pattern_idx % 2 == 1:  # last block is large
+                if self.large_dropout is not None:  # bert model, pooling logic
+                    pooled = self.branchy_bert.large_pooler(hidden_states)
+                    logits = self.large_classifier(pooled)
+                else:  # roberta & distill-roberta model
+                    logits = self.large_classifier(hidden_states)
+            elif pattern_idx % 2 == 0:  # large block is small
+                if self.large_dropout is not None:  # bert model, pooling logic
+                    pooled = self.branchy_bert.base_pooler(hidden_states)
+                    logits = self.base_classifier(pooled)
+                else:  # roberta & distill-roberta model
+                    logits = self.base_classifier(hidden_states)
+        else:
+            base_hidden_states, base_idx, large_hidden_states, large_idx = outputs[0]
+            internal_classifier_logits = outputs[-1]
+            if self.large_dropout is not None:  # bert model, pooling logic
+                base_pooled = self.branchy_bert.base_pooler(base_hidden_states)
+                large_pooled = self.branchy_bert.large_pooler(large_hidden_states)
+                base_pooled = self.base_dropout(base_pooled)
+                large_pooled = self.large_dropout(large_pooled)
+                base_logits = self.base_classifier(base_pooled)
+                large_logits = self.large_classifier(large_pooled)
 
-        base_hidden_states, base_idx, large_hidden_states, large_idx = outputs[0]
-        internal_classifier_logits = outputs[-1]
-        if self.large_dropout is not None:  # bert model, pooling logic
-            base_pooled = self.branchy_bert.base_pooler(base_hidden_states)
-            large_pooled = self.branchy_bert.large_pooler(large_hidden_states)
-            base_pooled = self.base_dropout(base_pooled)
-            large_pooled = self.large_dropout(large_pooled)
-            large_logits = self.large_classifier(base_pooled)
-            base_logits = self.base_classifier(large_pooled)
+            else:  # roberta & distill-roberta model
+                large_logits = self.large_classifier(large_hidden_states)
+                base_logits = self.base_classifier(base_hidden_states)
 
-        else:  # roberta & distill-roberta model
-            large_logits = self.large_classifier(large_hidden_states)
-            base_logits = self.base_classifier(base_hidden_states)
-
-        # concat
-        logits = torch.cat((base_logits, large_logits), dim=0)
-        idx = torch.cat((base_idx, large_idx), dim=0)
-        _, order = torch.sort(idx)
-        logits = logits[order]  # order it back
+            # concat
+            logits = torch.cat((base_logits, large_logits), dim=0)
+            idx = torch.cat((base_idx, large_idx), dim=0)
+            _, order = torch.sort(idx)
+            logits = logits[order]  # order it back
         outputs = (logits,) + outputs[2:]  # add hidden states and attention if they are here
 
         if labels is not None:
@@ -825,12 +885,13 @@ class BranchyModel(MixedBertForSequenceClassification):
             else:
                 loss_fct = CrossEntropyLoss()
                 loss = loss_fct(logits.view(-1, self.model_base.num_labels), labels.view(-1))
-
-            # this kd can be unsupervised
-            kd_loss = MSELoss()
-            for internal_logit in internal_classifier_logits:
-                loss += kd_loss(internal_logit.view(-1), logits.view(-1))  # teacher MSE loss for knowledge distillation
-            outputs = (loss,) + outputs
+            if internal_classifier_logits is not None:
+                # this kd can be unsupervised
+                kd_loss = MSELoss()
+                for internal_logit in internal_classifier_logits:
+                    # teacher MSE loss for knowledge distillation
+                    loss += kd_loss(internal_logit.view(-1), logits.view(-1))
+                outputs = (loss,) + outputs
 
         return outputs  # (loss), logits, (hidden_states), (attentions)
 
