@@ -840,7 +840,7 @@ class BranchyModel(MixedBertForSequenceClassification):
         if self.switch_pattern_idx != -1:  # fix pattern
             hidden_states = outputs[0]
             pattern_idx = self.switch_pattern_idx
-            for _ in self.num_parts:
+            for _ in range(self.num_parts):
                 pattern_idx //= 2  #
             if pattern_idx % 2 == 1:  # last block is large
                 if self.large_dropout is not None:  # bert model, pooling logic
@@ -874,7 +874,7 @@ class BranchyModel(MixedBertForSequenceClassification):
             idx = torch.cat((base_idx, large_idx), dim=0)
             _, order = torch.sort(idx)
             logits = logits[order]  # order it back
-        outputs = (logits,) + outputs[2:]  # add hidden states and attention if they are here
+        outputs = (logits,) + outputs[1:]  # add hidden states and attention if they are here
 
         if labels is not None:
             if self.model_base.num_labels == 1:
@@ -891,7 +891,7 @@ class BranchyModel(MixedBertForSequenceClassification):
                 for internal_logit in internal_classifier_logits:
                     # teacher MSE loss for knowledge distillation
                     loss += kd_loss(internal_logit.view(-1), logits.view(-1))
-                outputs = (loss,) + outputs
+            outputs = (loss,) + outputs
 
         return outputs  # (loss), logits, (hidden_states), (attentions)
 
