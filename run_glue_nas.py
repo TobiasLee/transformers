@@ -80,6 +80,11 @@ class ModelArguments:
         metadata={"help": "logits entropy threshold for switching "}
     )
 
+    switch_pattern_idx: Optional[int] = field(
+        default=-1,
+        metadata={"help": "switch pattern idx"}
+    )
+
 
 def main():
     # See all possible arguments in src/transformers/training_args.py
@@ -181,11 +186,14 @@ def main():
             path=model_args.saved_path, model_base=model_base, model_large=model_large,
         )
     else:
+        if model_args.switch_pattern_idx != -1:
+            logger.info("Running switch pattern %d" % model_args.switch_pattern_idx)
         model = BranchyModel(model_base=model_base, model_large=model_large,
                              switch_rate=0.5,
                              base_model_name=model_args.base_model_name,
                              large_model_name=model_args.large_model_name,
-                             entropy_threshold=model_args.entropy_threshold)
+                             entropy_threshold=model_args.entropy_threshold,
+                             switch_pattern_idx=model_args.switch_pattern_idx)
 
     # Get datasets
     train_dataset = (
