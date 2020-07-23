@@ -193,7 +193,7 @@ def main():
                              switch_rate=0.5,
                              base_model_name=model_args.base_model_handler,
                              large_model_name=model_args.large_model_handler,
-                             entropy_threshold=model_args.entropy_threshold)
+                             entropy_threshold=model_args.entropy_threshold,
                              switch_pattern_idx=model_args.switch_pattern_idx)
 
     # Get datasets
