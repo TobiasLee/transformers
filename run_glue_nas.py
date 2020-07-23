@@ -171,9 +171,10 @@ def main():
     )
 
     if model_args.freeze_trained_models:
-        for param in model_base.bert.parameters():
+        logger.info("Freeze trained base & large models")
+        for param in model_base.roberta.parameters():
             param.requires_grad = False
-        for param in model_large.bert.parameters():
+        for param in model_large.roberta.parameters():
             param.requires_grad = False
 
     if model_args.saved_path is not None:
