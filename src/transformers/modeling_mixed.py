@@ -843,6 +843,7 @@ class BranchyModel(MixedBertForSequenceClassification):
             for _ in range(self.num_parts - 1):
                 pattern_idx //= 2  #
             if pattern_idx % 2 == 1:  # last block is large
+                
                 if self.large_dropout is not None:  # bert model, pooling logic
                     pooled = self.branchy_bert.large_pooler(hidden_states)
                     logits = self.large_classifier(pooled)
