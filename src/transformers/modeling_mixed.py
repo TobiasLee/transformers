@@ -840,7 +840,7 @@ class BranchyModel(MixedBertForSequenceClassification):
         if self.switch_pattern_idx != -1:  # fix pattern
             hidden_states = outputs[0]
             pattern_idx = self.switch_pattern_idx
-            for _ in range(self.num_parts):
+            for _ in range(self.num_parts - 1):
                 pattern_idx //= 2  #
             if pattern_idx % 2 == 1:  # last block is large
                 if self.large_dropout is not None:  # bert model, pooling logic
