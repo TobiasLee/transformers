@@ -85,6 +85,11 @@ class ModelArguments:
         metadata={"help": "switch pattern idx"}
     )
 
+    num_parts: Optional[int] = field(
+        default=3,
+        metadata={"help": "num of blocks for base and large models"}
+    )
+
 
 def main():
     # See all possible arguments in src/transformers/training_args.py
@@ -196,6 +201,7 @@ def main():
             logger.info("Running switch pattern %d" % model_args.switch_pattern_idx)
         model = BranchyModel(model_base=model_base, model_large=model_large,
                              switch_rate=0.5,
+                             num_parts=model_args.num_parts,
                              base_model_name=model_args.base_model_handler,
                              large_model_name=model_args.large_model_handler,
                              entropy_threshold=model_args.entropy_threshold,
