@@ -49,6 +49,13 @@ class ModelArguments:
             "help":
             "Freeze fine-tuned base and large models"},
     )
+
+    share_tl: bool = field(
+        default=False,
+        metadata={
+            "help":
+            "Share transformation layers"},
+    )
     config_name: Optional[str] = field(
         default=None, metadata={"help": "Pretrained config name or path if not the same as model_name"}
     )
@@ -194,7 +201,8 @@ def main():
             base_model_name=model_args.base_model_handler,
             large_model_name=model_args.large_model_handler,
             entropy_threshold=model_args.entropy_threshold,
-            switch_pattern_idx=model_args.switch_pattern_idx
+            switch_pattern_idx=model_args.switch_pattern_idx,
+            share_tl=model_args.share_tl
         )
     else:
         if model_args.switch_pattern_idx != -1:
@@ -205,7 +213,8 @@ def main():
                              base_model_name=model_args.base_model_handler,
                              large_model_name=model_args.large_model_handler,
                              entropy_threshold=model_args.entropy_threshold,
-                             switch_pattern_idx=model_args.switch_pattern_idx)
+                             switch_pattern_idx=model_args.switch_pattern_idx,
+                             share_tl=model_args.share_tl)
 
     # Get datasets
     train_dataset = (
