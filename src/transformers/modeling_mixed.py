@@ -319,7 +319,8 @@ class RandomPathModel(MixedBertForSequenceClassification):
 class MixedBert(nn.Module, ModuleUtilsMixin):
     def __init__(self, model_base, model_large, num_parts,
                  base_model_name='bert',
-                 large_model_name='bert'):
+                 large_model_name='bert',
+                 share_tl=False):
         super(MixedBert, self).__init__()
         self.add_module("model_base", model_base)
         self.add_module("model_large", model_large)
@@ -333,7 +334,8 @@ class MixedBert(nn.Module, ModuleUtilsMixin):
         self.large_embeddings = large_model_handler.embeddings
         self.mixed_encoder = MixedEncoder(self.model_base, self.model_large, num_parts,
                                           base_model_name,
-                                          large_model_name)
+                                          large_model_name,
+                                          share_tl=share_tl)
         self.config = model_base.config
 
     def forward(self,
@@ -426,18 +428,28 @@ class MixedBert(nn.Module, ModuleUtilsMixin):
 class MixedEncoder(nn.Module):
     def __init__(self, model_base, model_large, num_parts=3,
                  base_model_name='bert',
-                 large_model_name='bert'):
+                 large_model_name='bert',
+                 share_tl=False):
         super(MixedEncoder, self).__init__()
         self.model_base = model_base
         self.model_large = model_large
         self.num_parts = num_parts
         # extra transformation layers
-        self.lo2hi_layers = nn.ModuleList([nn.Linear(self.model_base.config.hidden_size,
-                                                     self.model_large.config.hidden_size)
-                                           for _ in range(num_parts)])
-        self.hi2lo_layers = nn.ModuleList([nn.Linear(self.model_large.config.hidden_size,
-                                                     self.model_base.config.hidden_size)
-                                           for _ in range(num_parts)])
+        if not share_tl:
+            self.lo2hi_layers = nn.ModuleList([nn.Linear(self.model_base.config.hidden_size,
+                                                         self.model_large.config.hidden_size)
+                                               for _ in range(num_parts)])
+            self.hi2lo_layers = nn.ModuleList([nn.Linear(self.model_large.config.hidden_size,
+                                                         self.model_base.config.hidden_size)
+                                               for _ in range(num_parts)])
+        else:  # share tl
+            self.lo2hi_layers = nn.ModuleList([nn.Linear(self.model_base.config.hidden_size,
+                                                         self.model_large.config.hidden_size)
+                                               ] * num_parts)
+            self.hi2lo_layers = nn.ModuleList([nn.Linear(self.model_large.config.hidden_size,
+                                                         self.model_base.config.hidden_size)
+                                               ] * num_parts)
+
         # divide into parts
         self.base_interval = self.model_base.config.num_hidden_layers // num_parts
         self.large_interval = self.model_large.config.num_hidden_layers // num_parts
@@ -568,10 +580,12 @@ class BranchyBert(MixedBert):
                  base_model_name='bert',
                  large_model_name='bert',
                  entropy_lo_threshold=0.5,
-                 entropy_hi_threshold=1.0):
+                 entropy_hi_threshold=1.0,
+                 share_tl=False):
         super(BranchyBert, self).__init__(model_base, model_large, num_parts,
                                           base_model_name,
-                                          large_model_name)
+                                          large_model_name,
+                                          share_tl=share_tl)
         self.num_parts = num_parts
         self.base_early_classifiers = nn.ModuleList([
             Classifier(model_base.config) for _ in range(num_parts)
@@ -808,7 +822,8 @@ class BranchyModel(MixedBertForSequenceClassification):
                  base_model_name='bert',
                  large_model_name='bert',
                  entropy_threshold=0.5,
-                 switch_pattern_idx=-1
+                 switch_pattern_idx=-1,
+                 share_tl=False
                  ):
         super(BranchyModel, self).__init__(model_base, model_large)
         self.base_model_name = base_model_name
@@ -817,7 +832,8 @@ class BranchyModel(MixedBertForSequenceClassification):
         self.output_hidden_states = self.model_base.config.output_hidden_states
         self.branchy_bert = BranchyBert(model_base, model_large, num_parts,
                                         self.base_model_name, self.large_model_name,
-                                        entropy_lo_threshold=entropy_threshold)
+                                        entropy_lo_threshold=entropy_threshold,
+                                        share_tl=share_tl)
         self.num_parts = num_parts
         # final layer
         self.large_classifier = model_large.classifier
