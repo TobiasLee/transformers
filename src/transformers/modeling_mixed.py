@@ -150,7 +150,7 @@ class MixedBertForSequenceClassification(nn.Module):
     @classmethod
     def from_pretrained(cls, path, model_base, model_large, mode='random', **kwargs):
         archive_file = os.path.join(path, WEIGHTS_NAME)
-
+        logger.info("loading weights file {}".format(archive_file))
         try:
             state_dict = torch.load(archive_file, map_location="cpu")
         except Exception:
@@ -198,11 +198,15 @@ class MixedBertForSequenceClassification(nn.Module):
         start_prefix = ""
         model_to_load = model
         has_prefix_module = any(s.startswith(cls.base_model_prefix) for s in state_dict.keys())
+        #print(has_prefix_module)
         if not hasattr(model, cls.base_model_prefix) and has_prefix_module:
             start_prefix = cls.base_model_prefix + "."
         if hasattr(model, cls.base_model_prefix) and not has_prefix_module:
             model_to_load = getattr(model, cls.base_model_prefix)
-
+        print(start_prefix, cls.base_model_prefix)
+        print(model.__class__.__name__)
+        #model_to_load = model.branchy_bert
+        #start_prefix = "branchy_bert."
         load(model_to_load, prefix=start_prefix)
 
         if model.__class__.__name__ != model_to_load.__class__.__name__:
@@ -693,7 +697,7 @@ class BranchyBert(MixedBert):
                                                                    self.mixed_encoder.base_parts[i],
                                                                    base_idx)
                     last_block = 0
-
+                # print(last_block) 
                 switch_pattern_idx //= 2
                 if self.output_hidden_states:
                     all_hidden_states = all_hidden_states + (
@@ -794,6 +798,8 @@ class BranchyBert(MixedBert):
 
 
 class BranchyModel(MixedBertForSequenceClassification):
+    base_model_prefix = "branchy_bert"
+
     def __init__(self, model_base, model_large, switch_rate=0.5, num_parts=3,
                  base_model_name='bert',
                  large_model_name='bert',
