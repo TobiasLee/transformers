@@ -729,7 +729,7 @@ class BranchyBert(MixedBert):
                                                                            self.mixed_encoder.large_parts[i],
                                                                            large_idx)
 
-                selected_path.append(path)
+                selected_path.append((len(base_input), len(large_input)))
 
             else:
                 base_logits = self.base_early_classifiers[i](base_hidden_states)
@@ -781,6 +781,8 @@ class BranchyBert(MixedBert):
                 large_hidden_states, large_layer_outputs = _run_sub_blocks(large_hidden_states,
                                                                            self.mixed_encoder.large_parts[i],
                                                                            large_idx)
+                selected_path.append((len(base_hidden_states), len(large_hidden_states)))
+
             if self.output_hidden_states:
                 all_hidden_states = all_hidden_states + (
                     (base_hidden_states, large_hidden_states),)  # emit for the first hidden states?
@@ -794,6 +796,8 @@ class BranchyBert(MixedBert):
         if self.output_attentions:
             outputs = outputs + (all_attentions,)
         outputs = outputs + (logits,)
+        outputs = outputs + (selected_path, )
+
         return outputs  # last-layer hidden state, (all hidden states), (all attentions), (IC_logits), (selected_path)
 
 
@@ -863,7 +867,7 @@ class BranchyModel(MixedBertForSequenceClassification):
                     logits = self.base_classifier(hidden_states)
         else:
             base_hidden_states, base_idx, large_hidden_states, large_idx = outputs[0]
-            internal_classifier_logits = outputs[-1]
+            internal_classifier_logits = outputs[-2]
             if self.large_dropout is not None:  # bert model, pooling logic
                 base_pooled = self.branchy_bert.base_pooler(base_hidden_states)
                 large_pooled = self.branchy_bert.large_pooler(large_hidden_states)
@@ -876,6 +880,7 @@ class BranchyModel(MixedBertForSequenceClassification):
                 large_logits = self.large_classifier(large_hidden_states)
                 base_logits = self.base_classifier(base_hidden_states)
 
+            print(outputs[-1])  # selected path
             # concat
             logits = torch.cat((base_logits, large_logits), dim=0)
             idx = torch.cat((base_idx, large_idx), dim=0)
