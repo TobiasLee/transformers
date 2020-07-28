@@ -50,6 +50,13 @@ class ModelArguments:
             "Freeze fine-tuned base and large models"},
     )
 
+    iterative_training: bool = field(
+        default=False,
+        metadata={
+            "help":
+            "Iteratively train the switch path"},
+    )
+
     share_tl: bool = field(
         default=False,
         metadata={
