@@ -203,8 +203,8 @@ class MixedBertForSequenceClassification(nn.Module):
             start_prefix = cls.base_model_prefix + "."
         if hasattr(model, cls.base_model_prefix) and not has_prefix_module:
             model_to_load = getattr(model, cls.base_model_prefix)
-        print(start_prefix, cls.base_model_prefix)
-        print(model.__class__.__name__)
+        #print(start_prefix, cls.base_model_prefix)
+        #print(model.__class__.__name__)
         #model_to_load = model.branchy_bert
         #start_prefix = "branchy_bert."
         load(model_to_load, prefix=start_prefix)
@@ -757,7 +757,12 @@ class BranchyBert(MixedBert):
                 # Switch Logic
                 # compute entropy
                 base_ent = _entropy(base_logits)
+                #print("base entropy: ", base_ent)
+                #print(torch.std(base_ent))
+
                 large_ent = _entropy(large_logits)
+                #print("large ent: ", large_ent)
+                #print(torch.std(large_ent))
                 # print("base entropy size:", base_ent.size()[0])
                 # print("large entropy size:", large_ent.size()[0])
                 # bool indicator
@@ -896,7 +901,7 @@ class BranchyModel(MixedBertForSequenceClassification):
                 large_logits = self.large_classifier(large_hidden_states)
                 base_logits = self.base_classifier(base_hidden_states)
 
-            print(outputs[-1])  # selected path
+            # print(outputs[-1])  # selected path
             # concat
             logits = torch.cat((base_logits, large_logits), dim=0)
             idx = torch.cat((base_idx, large_idx), dim=0)
