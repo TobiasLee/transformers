@@ -198,15 +198,15 @@ class MixedBertForSequenceClassification(nn.Module):
         start_prefix = ""
         model_to_load = model
         has_prefix_module = any(s.startswith(cls.base_model_prefix) for s in state_dict.keys())
-        #print(has_prefix_module)
+        # print(has_prefix_module)
         if not hasattr(model, cls.base_model_prefix) and has_prefix_module:
             start_prefix = cls.base_model_prefix + "."
         if hasattr(model, cls.base_model_prefix) and not has_prefix_module:
             model_to_load = getattr(model, cls.base_model_prefix)
         print(start_prefix, cls.base_model_prefix)
         print(model.__class__.__name__)
-        #model_to_load = model.branchy_bert
-        #start_prefix = "branchy_bert."
+        # model_to_load = model.branchy_bert
+        # start_prefix = "branchy_bert."
         load(model_to_load, prefix=start_prefix)
 
         if model.__class__.__name__ != model_to_load.__class__.__name__:
@@ -810,7 +810,7 @@ class BranchyBert(MixedBert):
         if self.output_attentions:
             outputs = outputs + (all_attentions,)
         outputs = outputs + (logits,)
-        outputs = outputs + (selected_path, )
+        outputs = outputs + (selected_path,)
 
         return outputs  # last-layer hidden state, (all hidden states), (all attentions), (IC_logits), (selected_path)
 
@@ -842,6 +842,9 @@ class BranchyModel(MixedBertForSequenceClassification):
         self.large_dropout = getattr(self.model_large, 'dropout', None)
         self.switch_pattern_idx = switch_pattern_idx
 
+    def set_pattern_idx(self, pattern_idx):
+        self.switch_pattern_idx = pattern_idx
+
     def forward(
             self,
             input_ids=None,
@@ -869,7 +872,7 @@ class BranchyModel(MixedBertForSequenceClassification):
             for _ in range(self.num_parts - 1):
                 pattern_idx //= 2  #
             if pattern_idx % 2 == 1:  # last block is large
-                
+
                 if self.large_dropout is not None:  # bert model, pooling logic
                     pooled = self.branchy_bert.large_pooler(hidden_states)
                     logits = self.large_classifier(pooled)

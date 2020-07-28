@@ -252,11 +252,19 @@ def main():
 
     # Training
     if training_args.do_train:
-        trainer.train(
-            model_path=model_args.mixed_model_name_or_path if os.path.isdir(
-                model_args.mixed_model_name_or_path) else None
-        )
-        trainer.save_model()
+        each_epoch_num = training_args.num_train_epochs
+        if model_args.iterative_training:
+            for pattern_idx in range(1, 7):
+                model.set_pattern_idx(pattern_idx)
+                trainer.train(model_path=model_args.mixed_model_name_or_path if os.path.isdir(
+                    model_args.mixed_model_name_or_path) else None)
+                trainer.args.num_train_epochs += each_epoch_num
+        else:
+            trainer.train(
+                model_path=model_args.mixed_model_name_or_path if os.path.isdir(
+                    model_args.mixed_model_name_or_path) else None
+            )
+            trainer.save_model()
         # For convenience, we also re-save the tokenizer to the same directory,
         # so that you can share your model easily on huggingface.co/models =)
         if trainer.is_world_master():
