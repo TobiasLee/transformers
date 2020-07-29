@@ -853,7 +853,7 @@ class BranchyModel(MixedBertForSequenceClassification):
                  switch_pattern_idx=-1,
                  share_tl=False,
                  kd_tl=False,
-                 ):
+                 tl_kd_weight=1.0):
         super(BranchyModel, self).__init__(model_base, model_large)
         self.base_model_name = base_model_name
         self.large_model_name = large_model_name
@@ -872,6 +872,7 @@ class BranchyModel(MixedBertForSequenceClassification):
         self.large_dropout = getattr(self.model_large, 'dropout', None)
         self.switch_pattern_idx = switch_pattern_idx
         self.kd_tl = kd_tl
+        self.tl_kd_weight = tl_kd_weight
 
     def set_pattern_idx(self, pattern_idx):
         self.switch_pattern_idx = pattern_idx
@@ -945,7 +946,7 @@ class BranchyModel(MixedBertForSequenceClassification):
             else:
                 loss_fct = CrossEntropyLoss()
                 loss = loss_fct(logits.view(-1, self.model_base.num_labels), labels.view(-1))
-            print('classifier loss:', loss) 
+            # print('classifier loss:', loss)
             kd_loss = MSELoss()
 
             logits_kd_loss, tl_kd_loss = 0.0, 0.0 
@@ -954,13 +955,13 @@ class BranchyModel(MixedBertForSequenceClassification):
                 for internal_logit in internal_classifier_logits:
                     # teacher MSE loss for knowledge distillation
                     logits_kd_loss += kd_loss(internal_logit.view(-1), logits.view(-1))
-            print('logits kd loss:', logits_kd_loss)
+            # print('logits kd loss:', logits_kd_loss)
 
             if len(tl_pairs) != 0 and self.kd_tl:
                 for origin_hidden, tl_hidden in tl_pairs:
                     tl_kd_loss += kd_loss(origin_hidden.view(-1), tl_hidden.view(-1))
-            print("tl kd loss:", tl_kd_loss) 
-            outputs = (loss + logits_kd_loss + tl_kd_loss ,) + outputs
+            # print("tl kd loss:", tl_kd_loss)
+            outputs = (loss + logits_kd_loss + self.tl_kd_weight * tl_kd_loss,) + outputs
 
         return outputs  # (loss), logits, (hidden_states), (attentions)
 

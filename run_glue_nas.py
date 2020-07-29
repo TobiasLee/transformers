@@ -100,6 +100,10 @@ class ModelArguments:
         default=0.5,
         metadata={"help": "logits entropy threshold for switching "}
     )
+    tl_kd_weight: Optional[float] = field(
+        default=0.5,
+        metadata={"help": "ratio of knowledge distillation loss of transformation layers"}
+    )
 
     switch_pattern_idx: Optional[int] = field(
         default=-1,
@@ -219,7 +223,7 @@ def main():
             entropy_threshold=model_args.entropy_threshold,
             switch_pattern_idx=model_args.switch_pattern_idx,
             share_tl=model_args.share_tl,
-            kd_tl=model_args.kd_tl)
+            tl_kd_weight=model_args.tl_kd_weight)
     else:
         if model_args.switch_pattern_idx != -1:
             logger.info("Running switch pattern %d" % model_args.switch_pattern_idx)
@@ -231,7 +235,8 @@ def main():
                              entropy_threshold=model_args.entropy_threshold,
                              switch_pattern_idx=model_args.switch_pattern_idx,
                              share_tl=model_args.share_tl,
-                             kd_tl=model_args.kd_tl)
+                             kd_tl=model_args.kd_tl,
+                             tl_kd_weight=model_args.tl_kd_weight)
 
     # Get datasets
     train_dataset = (
