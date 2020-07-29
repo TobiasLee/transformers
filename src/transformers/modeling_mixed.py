@@ -742,6 +742,7 @@ class BranchyBert(MixedBert):
                 outputs = outputs + (all_hidden_states,)
             if self.output_attentions:
                 outputs = outputs + (all_attentions,)
+            outputs = outputs + (tl_pairs, ) + (selected_path,)
 
             return outputs
 
@@ -944,19 +945,22 @@ class BranchyModel(MixedBertForSequenceClassification):
             else:
                 loss_fct = CrossEntropyLoss()
                 loss = loss_fct(logits.view(-1, self.model_base.num_labels), labels.view(-1))
-
+            print('classifier loss:', loss) 
             kd_loss = MSELoss()
+
+            logits_kd_loss, tl_kd_loss = 0.0, 0.0 
             if internal_classifier_logits is not None:
                 # this kd can be unsupervised
                 for internal_logit in internal_classifier_logits:
                     # teacher MSE loss for knowledge distillation
-                    loss += kd_loss(internal_logit.view(-1), logits.view(-1))
+                    logits_kd_loss += kd_loss(internal_logit.view(-1), logits.view(-1))
+            print('logits kd loss:', logits_kd_loss)
 
             if len(tl_pairs) != 0 and self.kd_tl:
                 for origin_hidden, tl_hidden in tl_pairs:
-                    loss += kd_loss(origin_hidden.view(-1), tl_hidden.view(-1))
-
-            outputs = (loss,) + outputs
+                    tl_kd_loss += kd_loss(origin_hidden.view(-1), tl_hidden.view(-1))
+            print("tl kd loss:", tl_kd_loss) 
+            outputs = (loss + logits_kd_loss + tl_kd_loss ,) + outputs
 
         return outputs  # (loss), logits, (hidden_states), (attentions)
 
