@@ -47,21 +47,28 @@ class ModelArguments:
         default=False,
         metadata={
             "help":
-            "Freeze fine-tuned base and large models"},
+                "Freeze fine-tuned base and large models"},
     )
 
     iterative_training: bool = field(
         default=False,
         metadata={
             "help":
-            "Iteratively train the switch path"},
+                "Iteratively train the switch path"},
+    )
+
+    kd_tl: bool = field(
+        default=False,
+        metadata={
+            "help":
+                "Knowledge Distillation Transformation Layers"},
     )
 
     share_tl: bool = field(
         default=False,
         metadata={
             "help":
-            "Share transformation layers"},
+                "Share transformation layers"},
     )
     config_name: Optional[str] = field(
         default=None, metadata={"help": "Pretrained config name or path if not the same as model_name"}
@@ -211,8 +218,8 @@ def main():
             large_model_name=model_args.large_model_handler,
             entropy_threshold=model_args.entropy_threshold,
             switch_pattern_idx=model_args.switch_pattern_idx,
-            share_tl=model_args.share_tl
-        )
+            share_tl=model_args.share_tl,
+            kd_tl=model_args.kd_tl)
     else:
         if model_args.switch_pattern_idx != -1:
             logger.info("Running switch pattern %d" % model_args.switch_pattern_idx)
@@ -223,7 +230,8 @@ def main():
                              large_model_name=model_args.large_model_handler,
                              entropy_threshold=model_args.entropy_threshold,
                              switch_pattern_idx=model_args.switch_pattern_idx,
-                             share_tl=model_args.share_tl)
+                             share_tl=model_args.share_tl,
+                             kd_tl=model_args.kd_tl)
 
     # Get datasets
     train_dataset = (
@@ -289,10 +297,10 @@ def main():
         if data_args.task_name == "mnli":
             mnli_mm_data_args = dataclasses.replace(data_args, task_name="mnli-mm")
             # for acceraltion, we do not append mm dataset 
-            #eval_datasets.append(
+            # eval_datasets.append(
             #    GlueDataset(mnli_mm_data_args, tokenizer=tokenizer, evaluate=False)
-                # mode="dev", cache_dir=model_args.cache_dir)
-            #)
+            # mode="dev", cache_dir=model_args.cache_dir)
+            # )
 
         for eval_dataset in eval_datasets:
             trainer.compute_metrics = build_compute_metrics_fn(eval_dataset.args.task_name)
