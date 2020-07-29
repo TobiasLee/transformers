@@ -602,7 +602,6 @@ class BranchyBert(MixedBert):
         self.output_hidden_states = self.model_base.config.output_hidden_states
         self.kd_tl = kd_tl
 
-
     def forward(self,
                 input_ids=None,
                 attention_mask=None,
@@ -838,7 +837,7 @@ class BranchyBert(MixedBert):
         if self.output_attentions:
             outputs = outputs + (all_attentions,)
         outputs = outputs + (logits,)
-        outputs = outputs + (tl_pairs, ) + (selected_path,)
+        outputs = outputs + (tl_pairs,) + (selected_path,)
 
         return outputs  # last-layer hidden state, (all hidden states), (all attentions), (IC_logits), tl_pairs, (selected_path)
 
@@ -897,7 +896,7 @@ class BranchyModel(MixedBertForSequenceClassification):
             switch_pattern_idx=self.switch_pattern_idx
         )
         internal_classifier_logits = None
-        tl_pairs = outputs[-2] # tl_pairs
+        tl_pairs = outputs[-2]  # tl_pairs
         if self.switch_pattern_idx != -1:  # fix pattern
             hidden_states = outputs[0]
             pattern_idx = self.switch_pattern_idx
