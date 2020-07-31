@@ -708,7 +708,7 @@ class BranchyBert(MixedBert):
                 if switch_pattern_idx % 2 == 1:  # switch to large
                     if last_block == -1:  # first block
                         hidden_states = large_embedding_output
-                    elif last_block == 0:  # last block is small, run the TL
+                    elif last_block == 0:  # last block is small, run the lo2hi TL
                         hidden_states = self.mixed_encoder.lo2hi_layers[i](hidden_states)
                         if self.training and self.kd_tl:
                             tl_pairs.append((hidden_states, blocks_hiddens[i][1]))
@@ -720,7 +720,7 @@ class BranchyBert(MixedBert):
                 else:  # switch to base blocks
                     if last_block == -1:
                         hidden_states = base_embedding_output
-                    elif last_block == 1:  # last block is large, run the
+                    elif last_block == 1:  # last block is large, run the hi2lo TL
                         hidden_states = self.mixed_encoder.hi2lo_layers[i](hidden_states)
                         if self.training and self.kd_tl:
                             tl_pairs.append((hidden_states, blocks_hiddens[i][0]))
@@ -742,7 +742,7 @@ class BranchyBert(MixedBert):
                 outputs = outputs + (all_hidden_states,)
             if self.output_attentions:
                 outputs = outputs + (all_attentions,)
-            outputs = outputs + (tl_pairs, ) + (selected_path,)
+            outputs = outputs + (tl_pairs,) + (selected_path,)
 
             return outputs
 
@@ -853,7 +853,8 @@ class BranchyModel(MixedBertForSequenceClassification):
                  switch_pattern_idx=-1,
                  share_tl=False,
                  kd_tl=False,
-                 tl_kd_weight=1.0):
+                 tl_kd_weight=1.0,
+                 only_cls=False):
         super(BranchyModel, self).__init__(model_base, model_large)
         self.base_model_name = base_model_name
         self.large_model_name = large_model_name
@@ -873,6 +874,7 @@ class BranchyModel(MixedBertForSequenceClassification):
         self.switch_pattern_idx = switch_pattern_idx
         self.kd_tl = kd_tl
         self.tl_kd_weight = tl_kd_weight
+        self.only_cls = only_cls
 
     def set_pattern_idx(self, pattern_idx):
         self.switch_pattern_idx = pattern_idx
@@ -949,7 +951,7 @@ class BranchyModel(MixedBertForSequenceClassification):
             # print('classifier loss:', loss)
             kd_loss = MSELoss()
 
-            logits_kd_loss, tl_kd_loss = 0.0, 0.0 
+            logits_kd_loss, tl_kd_loss = 0.0, 0.0
             if internal_classifier_logits is not None:
                 # this kd can be unsupervised
                 for internal_logit in internal_classifier_logits:
@@ -958,8 +960,13 @@ class BranchyModel(MixedBertForSequenceClassification):
             # print('logits kd loss:', logits_kd_loss)
 
             if len(tl_pairs) != 0 and self.kd_tl:
-                for origin_hidden, tl_hidden in tl_pairs:
-                    tl_kd_loss += kd_loss(origin_hidden.view(-1), tl_hidden.view(-1))
+                for tl_hidden, origin_hidden in tl_pairs:
+                    if self.only_cls:
+                        origin_cls_hidden = origin_hidden[:, 0]
+                        tl_cls_hidden = tl_hidden[:, 0]
+                        tl_kd_loss += kd_loss(origin_cls_hidden.view(-1), tl_cls_hidden.view(-1))
+                    else:
+                        tl_kd_loss += kd_loss(origin_hidden.view(-1), tl_hidden.view(-1))
             # print("tl kd loss:", tl_kd_loss)
             outputs = (loss + logits_kd_loss + self.tl_kd_weight * tl_kd_loss,) + outputs
 

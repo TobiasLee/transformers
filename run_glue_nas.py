@@ -64,6 +64,13 @@ class ModelArguments:
                 "Knowledge Distillation Transformation Layers"},
     )
 
+    only_cls: bool = field(
+        default=False,
+        metadata={
+            "help":
+                "Only Distill [CLS] representation when KD"},
+    )
+
     share_tl: bool = field(
         default=False,
         metadata={
@@ -223,7 +230,8 @@ def main():
             entropy_threshold=model_args.entropy_threshold,
             switch_pattern_idx=model_args.switch_pattern_idx,
             share_tl=model_args.share_tl,
-            tl_kd_weight=model_args.tl_kd_weight)
+            tl_kd_weight=model_args.tl_kd_weight,
+            only_cls=model_args.only_cls)
     else:
         if model_args.switch_pattern_idx != -1:
             logger.info("Running switch pattern %d" % model_args.switch_pattern_idx)
@@ -236,7 +244,8 @@ def main():
                              switch_pattern_idx=model_args.switch_pattern_idx,
                              share_tl=model_args.share_tl,
                              kd_tl=model_args.kd_tl,
-                             tl_kd_weight=model_args.tl_kd_weight)
+                             tl_kd_weight=model_args.tl_kd_weight,
+                             only_cls=model_args.only_cls)
 
     # Get datasets
     train_dataset = (
