@@ -71,6 +71,13 @@ class ModelArguments:
                 "Only Distill [CLS] representation when KD"},
     )
 
+    only_kd_loss: bool = field(
+        default=False,
+        metadata={
+            "help":
+                "Only fine-tune the TL with kd loss"},
+    )
+
     share_tl: bool = field(
         default=False,
         metadata={
@@ -213,10 +220,17 @@ def main():
     )
 
     if model_args.freeze_trained_models:
-        logger.info("Freeze trained base & large models")
+        logger.info("Freeze trained base & large models' encoder ")
         for param in model_base.roberta.parameters():
             param.requires_grad = False
         for param in model_large.roberta.parameters():
+            param.requires_grad = False
+
+    if model_args.only_kd_loss:
+        logger.info("Freeze trained base & large models' classifier")
+        for param in model_base.classifier.parameters():
+            param.requires_grad = False
+        for param in model_large.classifier.parameters():
             param.requires_grad = False
 
     if model_args.saved_path is not None:
@@ -231,7 +245,8 @@ def main():
             switch_pattern_idx=model_args.switch_pattern_idx,
             share_tl=model_args.share_tl,
             tl_kd_weight=model_args.tl_kd_weight,
-            only_cls=model_args.only_cls)
+            only_cls=model_args.only_cls,
+            only_kd_loss=model_args.only_kd_loss)
     else:
         if model_args.switch_pattern_idx != -1:
             logger.info("Running switch pattern %d" % model_args.switch_pattern_idx)
@@ -245,7 +260,8 @@ def main():
                              share_tl=model_args.share_tl,
                              kd_tl=model_args.kd_tl,
                              tl_kd_weight=model_args.tl_kd_weight,
-                             only_cls=model_args.only_cls)
+                             only_cls=model_args.only_cls,
+                             only_kd_loss=model_args.only_kd_loss)
 
     # Get datasets
     train_dataset = (
