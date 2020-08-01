@@ -854,7 +854,8 @@ class BranchyModel(MixedBertForSequenceClassification):
                  share_tl=False,
                  kd_tl=False,
                  tl_kd_weight=1.0,
-                 only_cls=False):
+                 only_cls=False,
+                 only_kd_loss=False):
         super(BranchyModel, self).__init__(model_base, model_large)
         self.base_model_name = base_model_name
         self.large_model_name = large_model_name
@@ -875,6 +876,7 @@ class BranchyModel(MixedBertForSequenceClassification):
         self.kd_tl = kd_tl
         self.tl_kd_weight = tl_kd_weight
         self.only_cls = only_cls
+        self.only_kd_loss = only_kd_loss
 
     def set_pattern_idx(self, pattern_idx):
         self.switch_pattern_idx = pattern_idx
@@ -968,7 +970,10 @@ class BranchyModel(MixedBertForSequenceClassification):
                     else:
                         tl_kd_loss += kd_loss(origin_hidden.view(-1), tl_hidden.view(-1))
             # print("tl kd loss:", tl_kd_loss)
-            outputs = (loss + logits_kd_loss + self.tl_kd_weight * tl_kd_loss,) + outputs
+            if self.only_kd_loss:
+                outputs = ( self.tl_kd_weight * tl_kd_loss, ) + outputs
+            else:
+                outputs = (loss + logits_kd_loss + self.tl_kd_weight * tl_kd_loss,) + outputs
 
         return outputs  # (loss), logits, (hidden_states), (attentions)
 
