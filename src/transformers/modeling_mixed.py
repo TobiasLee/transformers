@@ -971,7 +971,8 @@ class BranchyModel(MixedBertForSequenceClassification):
                         tl_kd_loss += kd_loss(origin_hidden.view(-1), tl_hidden.view(-1))
             # print("tl kd loss:", tl_kd_loss)
             if self.only_kd_loss:
-                outputs = ( self.tl_kd_weight * tl_kd_loss, ) + outputs
+                loss = torch.zeros_like(loss)  # set loss to zero
+                outputs = ( loss + self.tl_kd_weight * tl_kd_loss, ) + outputs
             else:
                 outputs = (loss + logits_kd_loss + self.tl_kd_weight * tl_kd_loss,) + outputs
 
