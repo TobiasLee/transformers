@@ -84,6 +84,13 @@ class ModelArguments:
             "help":
                 "Share transformation layers"},
     )
+
+    non_linear_tl: bool = field(
+        default=False,
+        metadata={
+            "help":
+                "Non-linear TL layers"},
+    )
     config_name: Optional[str] = field(
         default=None, metadata={"help": "Pretrained config name or path if not the same as model_name"}
     )
@@ -246,7 +253,8 @@ def main():
             share_tl=model_args.share_tl,
             tl_kd_weight=model_args.tl_kd_weight,
             only_cls=model_args.only_cls,
-            only_kd_loss=model_args.only_kd_loss)
+            only_kd_loss=model_args.only_kd_loss,
+            non_linear_tl=model_args.non_linear_tl)
     else:
         if model_args.switch_pattern_idx != -1:
             logger.info("Running switch pattern %d" % model_args.switch_pattern_idx)
@@ -261,7 +269,8 @@ def main():
                              kd_tl=model_args.kd_tl,
                              tl_kd_weight=model_args.tl_kd_weight,
                              only_cls=model_args.only_cls,
-                             only_kd_loss=model_args.only_kd_loss)
+                             only_kd_loss=model_args.only_kd_loss,
+                             non_linear_tl=model_args.non_linear_tl)
 
     # Get datasets
     train_dataset = (

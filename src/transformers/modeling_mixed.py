@@ -427,11 +427,26 @@ class MixedBert(nn.Module, ModuleUtilsMixin):
         return outputs
 
 
+class TLLayer(nn.Module):
+    def __init__(self, in_feautre, out_feature):
+        super(TLLayer, self).__init__()
+        self.dense1 = nn.Linear(in_feautre, out_feature)
+        self.act = nn.functional.gelu
+        self.dense2 = nn.Linear(out_feature, out_feature)
+
+    def forward(self, hidden_states):
+        hidden_states = self.dense(hidden_states)
+        hidden_states = self.act(hidden_states)
+        transformed_hiddens = self.dense2(hidden_states)
+        return transformed_hiddens
+
+
 class MixedEncoder(nn.Module):
     def __init__(self, model_base, model_large, num_parts=3,
                  base_model_name='bert',
                  large_model_name='bert',
-                 share_tl=False):
+                 share_tl=False,
+                 non_linear_tl=False):
         super(MixedEncoder, self).__init__()
         self.model_base = model_base
         self.model_large = model_large
@@ -440,16 +455,28 @@ class MixedEncoder(nn.Module):
         if not share_tl:
             self.lo2hi_layers = nn.ModuleList([nn.Linear(self.model_base.config.hidden_size,
                                                          self.model_large.config.hidden_size)
+                                               if not non_linear_tl else
+                                               TLLayer(self.model_base.config.hidden_size,
+                                                       self.model_large.config.hidden_size)
                                                for _ in range(num_parts)])
             self.hi2lo_layers = nn.ModuleList([nn.Linear(self.model_large.config.hidden_size,
                                                          self.model_base.config.hidden_size)
+                                               if not non_linear_tl else
+                                               TLLayer(self.model_large.config.hidden_size,
+                                                       self.model_base.config.hidden_size)
                                                for _ in range(num_parts)])
         else:  # share tl
             self.lo2hi_layers = nn.ModuleList([nn.Linear(self.model_base.config.hidden_size,
                                                          self.model_large.config.hidden_size)
+                                               if not non_linear_tl else
+                                               TLLayer(self.model_base.config.hidden_size,
+                                                       self.model_large.config.hidden_size)
                                                ] * num_parts)
             self.hi2lo_layers = nn.ModuleList([nn.Linear(self.model_large.config.hidden_size,
                                                          self.model_base.config.hidden_size)
+                                               if not non_linear_tl else
+                                               TLLayer(self.model_large.config.hidden_size,
+                                                       self.model_base.config.hidden_size)
                                                ] * num_parts)
 
         # divide into parts
@@ -584,11 +611,14 @@ class BranchyBert(MixedBert):
                  entropy_lo_threshold=0.5,
                  entropy_hi_threshold=1.0,
                  share_tl=False,
-                 kd_tl=False):
+                 kd_tl=False,
+                 non_linear_tl=False
+                 ):
         super(BranchyBert, self).__init__(model_base, model_large, num_parts,
                                           base_model_name,
                                           large_model_name,
-                                          share_tl=share_tl)
+                                          share_tl=share_tl,
+                                          non_linear_tl=non_linear_tl)
         self.num_parts = num_parts
         self.base_early_classifiers = nn.ModuleList([
             Classifier(model_base.config) for _ in range(num_parts)
@@ -855,7 +885,8 @@ class BranchyModel(MixedBertForSequenceClassification):
                  kd_tl=False,
                  tl_kd_weight=1.0,
                  only_cls=False,
-                 only_kd_loss=False):
+                 only_kd_loss=False,
+                 non_linear_tl=False):
         super(BranchyModel, self).__init__(model_base, model_large)
         self.base_model_name = base_model_name
         self.large_model_name = large_model_name
@@ -865,7 +896,8 @@ class BranchyModel(MixedBertForSequenceClassification):
                                         self.base_model_name, self.large_model_name,
                                         entropy_lo_threshold=entropy_threshold,
                                         share_tl=share_tl,
-                                        kd_tl=kd_tl)
+                                        kd_tl=kd_tl,
+                                        non_linear_tl=non_linear_tl)
         self.num_parts = num_parts
         # final layer
         self.large_classifier = model_large.classifier
@@ -972,7 +1004,7 @@ class BranchyModel(MixedBertForSequenceClassification):
             # print("tl kd loss:", tl_kd_loss)
             if self.only_kd_loss:
                 loss = torch.zeros_like(loss)  # set loss to zero
-                outputs = ( loss + self.tl_kd_weight * tl_kd_loss, ) + outputs
+                outputs = (loss + self.tl_kd_weight * tl_kd_loss,) + outputs
             else:
                 outputs = (loss + logits_kd_loss + self.tl_kd_weight * tl_kd_loss,) + outputs
 
