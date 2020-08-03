@@ -996,9 +996,9 @@ class BranchyModel(MixedBertForSequenceClassification):
             if len(tl_pairs) != 0 and self.kd_tl:
                 for tl_hidden, origin_hidden in tl_pairs:
                     if self.only_cls:
-                        origin_cls_hidden = origin_hidden[:, 0]
-                        tl_cls_hidden = tl_hidden[:, 0]
-                        tl_kd_loss += kd_loss(origin_cls_hidden.view(-1), tl_cls_hidden.view(-1))
+                        origin_cls_hidden = origin_hidden[:, 0, : ]
+                        tl_cls_hidden = tl_hidden[:,0, :]
+                        tl_kd_loss += kd_loss(origin_cls_hidden, tl_cls_hidden)
                     else:
                         tl_kd_loss += kd_loss(origin_hidden.view(-1), tl_hidden.view(-1))
             # print("tl kd loss:", tl_kd_loss)
