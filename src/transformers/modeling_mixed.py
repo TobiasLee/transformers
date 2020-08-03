@@ -322,7 +322,8 @@ class MixedBert(nn.Module, ModuleUtilsMixin):
     def __init__(self, model_base, model_large, num_parts,
                  base_model_name='bert',
                  large_model_name='bert',
-                 share_tl=False):
+                 share_tl=False,
+                 non_linear_tl=False):
         super(MixedBert, self).__init__()
         self.add_module("model_base", model_base)
         self.add_module("model_large", model_large)
@@ -337,7 +338,8 @@ class MixedBert(nn.Module, ModuleUtilsMixin):
         self.mixed_encoder = MixedEncoder(self.model_base, self.model_large, num_parts,
                                           base_model_name,
                                           large_model_name,
-                                          share_tl=share_tl)
+                                          share_tl=share_tl,
+                                          non_linear_tl=non_linear_tl)
         self.config = model_base.config
 
     def forward(self,
