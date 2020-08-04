@@ -85,6 +85,20 @@ class ModelArguments:
                 "Share transformation layers"},
     )
 
+    unfreeze_large_encoder: bool = field(
+        default=False,
+        metadata={
+            "help":
+                "Freeze large encoder"},
+    )
+
+    unfreeze_base_encoder: bool = field(
+        default=False,
+        metadata={
+            "help":
+                "Freeze base encoder"},
+    )
+
     non_linear_tl: bool = field(
         default=False,
         metadata={
@@ -227,11 +241,14 @@ def main():
     )
 
     if model_args.freeze_trained_models:
-        logger.info("Freeze trained base & large models' encoder ")
-        for param in model_base.roberta.parameters():
-            param.requires_grad = False
-        for param in model_large.roberta.parameters():
-            param.requires_grad = False
+        if not model_args.unfreeze_base_encoder:
+            logger.info("Freeze trained base models encoder ")
+            for param in model_base.roberta.parameters():
+                param.requires_grad = False
+        if not model_args.unfreeze_large_encoder:
+            logger.info("Freeze trained large models encoder ")
+            for param in model_large.roberta.parameters():
+                param.requires_grad = False
 
     if model_args.only_kd_loss:
         logger.info("Freeze trained base & large models' classifier")
