@@ -437,7 +437,7 @@ class TLLayer(nn.Module):
         self.dense2 = nn.Linear(out_feature, out_feature)
 
     def forward(self, hidden_states):
-        hidden_states = self.dense(hidden_states)
+        hidden_states = self.dense1(hidden_states)
         hidden_states = self.act(hidden_states)
         transformed_hiddens = self.dense2(hidden_states)
         return transformed_hiddens
