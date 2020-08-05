@@ -602,7 +602,6 @@ class Classifier(nn.Module):
         pooler_output = self.pooler(hidden_states)  # can use multiple-pooler ?
         pooled_output = self.dropout(pooler_output)
         logits = self.classifier(pooled_output)
-
         return logits
 
 
@@ -743,7 +742,7 @@ class BranchyBert(MixedBert):
                     elif last_block == 0:  # last block is small, run the lo2hi TL
                         hidden_states = self.mixed_encoder.lo2hi_layers[i](hidden_states)
                         if self.training and self.kd_tl:
-                            tl_pairs.append((hidden_states, blocks_hiddens[i][1]))
+                            tl_pairs.append((hidden_states, blocks_hiddens[i-1][1]))
                     large_idx = torch.arange(bsz) > -1  # all true
                     hidden_states, layer_outputs = _run_sub_blocks(hidden_states,
                                                                    self.mixed_encoder.large_parts[i],
@@ -755,7 +754,7 @@ class BranchyBert(MixedBert):
                     elif last_block == 1:  # last block is large, run the hi2lo TL
                         hidden_states = self.mixed_encoder.hi2lo_layers[i](hidden_states)
                         if self.training and self.kd_tl:
-                            tl_pairs.append((hidden_states, blocks_hiddens[i][0]))
+                            tl_pairs.append((hidden_states, blocks_hiddens[i-1][0]))
 
                     base_idx = torch.arange(bsz) > -1  # all true
                     hidden_states, layer_outputs = _run_sub_blocks(hidden_states,
