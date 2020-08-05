@@ -71,6 +71,13 @@ class ModelArguments:
                 "Only Distill [CLS] representation when KD"},
     )
 
+    freeze_classifiers: bool = field(
+        default=False,
+        metadata={
+            "help":
+                "freeze base & large model classifier"},
+    )
+
     only_kd_loss: bool = field(
         default=False,
         metadata={
@@ -250,7 +257,7 @@ def main():
             for param in model_large.roberta.parameters():
                 param.requires_grad = False
 
-    if model_args.only_kd_loss:
+    if model_args.freeze_classifier:
         logger.info("Freeze trained base & large models' classifier")
         for param in model_base.classifier.parameters():
             param.requires_grad = False
