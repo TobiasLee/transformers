@@ -257,7 +257,7 @@ def main():
             for param in model_large.roberta.parameters():
                 param.requires_grad = False
 
-    if model_args.freeze_classifier:
+    if model_args.freeze_classifiers:
         logger.info("Freeze trained base & large models' classifier")
         for param in model_base.classifier.parameters():
             param.requires_grad = False
