@@ -44,6 +44,7 @@ from src.transformers.modeling_utils import ModuleUtilsMixin
 #   "type_vocab_size": 2,
 #   "vocab_size": 30522
 # }
+from transformers import RobertaConfig
 from transformers.modeling_roberta import RobertaLMHead
 
 WEIGHTS_NAME = "pytorch_model.bin"
@@ -890,8 +891,9 @@ class BranchyModel(MixedBertForSequenceClassification):
                  only_cls=False,
                  only_kd_loss=False,
                  non_linear_tl=False,
-                 pretrain_mlm=False):
-        super(BranchyModel, self).__init__(model_base, model_large)
+                 pretrain_mlm=False,
+                 config=RobertaConfig()):
+        super(BranchyModel, self).__init__(model_base, model_large, config=config)
         self.base_model_name = base_model_name
         self.large_model_name = large_model_name
         self.output_attentions = self.model_base.config.output_attentions
@@ -958,7 +960,7 @@ class BranchyModel(MixedBertForSequenceClassification):
 
             sequence_output = outputs[0]
 
-            if self.switch_pattern_idx != 1:
+            if self.switch_pattern_idx != -1:
                 pattern_idx = self.switch_pattern_idx
                 for _ in range(self.num_parts - 1):
                     pattern_idx //= 2  #
