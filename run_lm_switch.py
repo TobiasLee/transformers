@@ -341,7 +341,9 @@ def main():
                              non_linear_tl=model_args.non_linear_tl,
                              pretrain_mlm=True)
 
-    # model.resize_token_embeddings(len(tokenizer))
+    logger.info('len tokenizer: %d' %  len(tokenizer))
+    model.model_base.resize_token_embeddings(len(tokenizer))
+    model.model_large.resize_token_embeddings(len(tokenizer))
 
     # if config.model_type in ["bert", "roberta", "distilbert", "camembert"] and not data_args.mlm:
     #     raise ValueError(

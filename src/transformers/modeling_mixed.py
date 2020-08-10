@@ -958,7 +958,7 @@ class BranchyModel(MixedBertForSequenceClassification):
 
             sequence_output = outputs[0]
 
-            if self.switch_pattern_idx != 1:
+            if self.switch_pattern_idx != -1:
                 pattern_idx = self.switch_pattern_idx
                 for _ in range(self.num_parts - 1):
                     pattern_idx //= 2  #
