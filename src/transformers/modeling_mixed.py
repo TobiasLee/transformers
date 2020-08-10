@@ -44,6 +44,8 @@ from src.transformers.modeling_utils import ModuleUtilsMixin
 #   "type_vocab_size": 2,
 #   "vocab_size": 30522
 # }
+from transformers.modeling_roberta import RobertaLMHead
+
 WEIGHTS_NAME = "pytorch_model.bin"
 
 
@@ -742,7 +744,7 @@ class BranchyBert(MixedBert):
                     elif last_block == 0:  # last block is small, run the lo2hi TL
                         hidden_states = self.mixed_encoder.lo2hi_layers[i](hidden_states)
                         if self.training and self.kd_tl:
-                            tl_pairs.append((hidden_states, blocks_hiddens[i-1][1]))
+                            tl_pairs.append((hidden_states, blocks_hiddens[i - 1][1]))
                     large_idx = torch.arange(bsz) > -1  # all true
                     hidden_states, layer_outputs = _run_sub_blocks(hidden_states,
                                                                    self.mixed_encoder.large_parts[i],
@@ -754,7 +756,7 @@ class BranchyBert(MixedBert):
                     elif last_block == 1:  # last block is large, run the hi2lo TL
                         hidden_states = self.mixed_encoder.hi2lo_layers[i](hidden_states)
                         if self.training and self.kd_tl:
-                            tl_pairs.append((hidden_states, blocks_hiddens[i-1][0]))
+                            tl_pairs.append((hidden_states, blocks_hiddens[i - 1][0]))
 
                     base_idx = torch.arange(bsz) > -1  # all true
                     hidden_states, layer_outputs = _run_sub_blocks(hidden_states,
@@ -887,7 +889,8 @@ class BranchyModel(MixedBertForSequenceClassification):
                  tl_kd_weight=1.0,
                  only_cls=False,
                  only_kd_loss=False,
-                 non_linear_tl=False):
+                 non_linear_tl=False,
+                 pretrain_mlm=False):
         super(BranchyModel, self).__init__(model_base, model_large)
         self.base_model_name = base_model_name
         self.large_model_name = large_model_name
@@ -910,6 +913,12 @@ class BranchyModel(MixedBertForSequenceClassification):
         self.tl_kd_weight = tl_kd_weight
         self.only_cls = only_cls
         self.only_kd_loss = only_kd_loss
+        if pretrain_mlm:  # add extra LM heads for mlm prediction
+            self.base_lm_head = RobertaLMHead(model_base.config)
+            self.large_lm_head = RobertaLMHead(model_large.config)
+            self.mlm = True
+        else:
+            self.mlm = False
 
     def set_pattern_idx(self, pattern_idx):
         self.switch_pattern_idx = pattern_idx
@@ -924,6 +933,7 @@ class BranchyModel(MixedBertForSequenceClassification):
             inputs_embeds=None,
             labels=None,
             mlp_mask=None,
+            **kwargs,
     ):
         outputs = self.branchy_bert(
             input_ids,
@@ -936,6 +946,37 @@ class BranchyModel(MixedBertForSequenceClassification):
         )
         internal_classifier_logits = None
         tl_pairs = outputs[-2]  # tl_pairs
+
+        if self.mlm:
+            if "masked_lm_labels" in kwargs:
+                warnings.warn(
+                    "The `masked_lm_labels` argument is deprecated "
+                    "and will be removed in a future version, use `labels` instead.",
+                    DeprecationWarning,
+                )
+                labels = kwargs.pop("masked_lm_labels")
+
+            sequence_output = outputs[0]
+
+            if self.switch_pattern_idx != 1:
+                pattern_idx = self.switch_pattern_idx
+                for _ in range(self.num_parts - 1):
+                    pattern_idx //= 2  #
+                if pattern_idx % 2 == 1:  # last block is large
+                    prediction_scores = self.large_lm_head(sequence_output)
+                elif pattern_idx % 2 == 0:
+                    prediction_scores = self.base_lm_head(sequence_output)
+                else:
+                    raise Exception("incorrect pattern_idx")
+            outputs = (prediction_scores,) + outputs[2:]  # Add hidden states and attention if they are here
+
+            if labels is not None:
+                loss_fct = CrossEntropyLoss()
+                masked_lm_loss = loss_fct(prediction_scores.view(-1, self.config.vocab_size), labels.view(-1))
+                outputs = (masked_lm_loss,) + outputs
+
+            return outputs  # (masked_lm_loss), prediction_scores, (hidden_states), (attentions)
+
         if self.switch_pattern_idx != -1:  # fix pattern
             hidden_states = outputs[0]
             pattern_idx = self.switch_pattern_idx
@@ -997,8 +1038,8 @@ class BranchyModel(MixedBertForSequenceClassification):
             if len(tl_pairs) != 0 and self.kd_tl:
                 for tl_hidden, origin_hidden in tl_pairs:
                     if self.only_cls:
-                        origin_cls_hidden = origin_hidden[:, 0, : ]
-                        tl_cls_hidden = tl_hidden[:,0, :]
+                        origin_cls_hidden = origin_hidden[:, 0, :]
+                        tl_cls_hidden = tl_hidden[:, 0, :]
                         tl_kd_loss += kd_loss(origin_cls_hidden, tl_cls_hidden)
                     else:
                         tl_kd_loss += kd_loss(origin_hidden.view(-1), tl_hidden.view(-1))
