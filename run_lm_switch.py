@@ -322,7 +322,8 @@ def main():
             only_cls=model_args.only_cls,
             only_kd_loss=model_args.only_kd_loss,
             non_linear_tl=model_args.non_linear_tl,
-            pretrain_mlm=True)
+            pretrain_mlm=True,
+            config=model_base.config)
     else:
         if model_args.switch_pattern_idx != -1:
             logger.info("Running switch pattern %d" % model_args.switch_pattern_idx)
@@ -339,7 +340,8 @@ def main():
                              only_cls=model_args.only_cls,
                              only_kd_loss=model_args.only_kd_loss,
                              non_linear_tl=model_args.non_linear_tl,
-                             pretrain_mlm=True)
+                             pretrain_mlm=True,
+                             config=model_base.config)
 
     logger.info('len tokenizer: %d' %  len(tokenizer))
     model.model_base.resize_token_embeddings(len(tokenizer))
