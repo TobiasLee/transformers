@@ -905,21 +905,22 @@ class BranchyModel(MixedBertForSequenceClassification):
                                         kd_tl=kd_tl,
                                         non_linear_tl=non_linear_tl)
         self.num_parts = num_parts
-        # final layer
-        self.large_classifier = model_large.classifier
-        self.base_classifier = model_base.classifier
-        self.base_dropout = getattr(self.model_base, 'dropout', None)
-        self.large_dropout = getattr(self.model_large, 'dropout', None)
+
         self.switch_pattern_idx = switch_pattern_idx
         self.kd_tl = kd_tl
         self.tl_kd_weight = tl_kd_weight
         self.only_cls = only_cls
         self.only_kd_loss = only_kd_loss
+        # final classification layer
         if pretrain_mlm:  # add extra LM heads for mlm prediction
-            self.base_lm_head = RobertaLMHead(model_base.config)
-            self.large_lm_head = RobertaLMHead(model_large.config)
+            self.base_lm_head =  model_base.lm_head
+            self.large_lm_head = model_large.lm_head
             self.mlm = True
         else:
+            self.large_classifier = model_large.classifier
+            self.base_classifier = model_base.classifier
+            self.base_dropout = getattr(self.model_base, 'dropout', None)
+            self.large_dropout = getattr(self.model_large, 'dropout', None)
             self.mlm = False
 
     def set_pattern_idx(self, pattern_idx):

@@ -10,7 +10,7 @@ from typing import Callable, Dict, Optional
 import numpy as np
 
 from transformers import AutoConfig, AutoModelForSequenceClassification, AutoTokenizer, EvalPrediction, GlueDataset, \
-    LineByLineTextDataset, TextDataset, PreTrainedTokenizer, DataCollatorForLanguageModeling
+    LineByLineTextDataset, TextDataset, PreTrainedTokenizer, DataCollatorForLanguageModeling, AutoModelWithLMHead
 from transformers.modeling_mixed import BranchyModel, math
 
 from transformers import GlueDataTrainingArguments as DataTrainingArguments
@@ -276,14 +276,14 @@ def main():
         cache_dir=model_args.cache_dir,
     )
 
-    model_base = AutoModelForSequenceClassification.from_pretrained(
+    model_base = AutoModelWithLMHead.from_pretrained(
         model_args.base_model_name_or_path,  # base model
         from_tf=bool(".ckpt" in model_args.base_model_name_or_path),
         config=config_base,
         cache_dir=model_args.cache_dir,
     )
 
-    model_large = AutoModelForSequenceClassification.from_pretrained(
+    model_large = AutoModelWithLMHead.from_pretrained(
         model_args.large_model_name_or_path,  # large model
         from_tf=bool(".ckpt" in model_args.large_model_name_or_path),
         config=config_large,
