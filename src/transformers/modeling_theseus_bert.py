@@ -11,13 +11,13 @@ from torch.distributions.bernoulli import Bernoulli
 
 from transformers.modeling_utils import PreTrainedModel
 from transformers.configuration_bert import BertConfig
-from transformers.modeling_bert import load_tf_weights_in_bert,  BertLayerNorm, BertEmbeddings,  BertLayer, BertPooler
+from transformers.modeling_bert import load_tf_weights_in_bert, BertLayerNorm, BertEmbeddings, BertLayer, BertPooler
 
 logger = logging.getLogger(__name__)
 
 
 class BertEncoder(nn.Module):
-    def __init__(self, config, scc_n_layer=6):
+    def __init__(self, config, scc_n_layer=6, switch_pattern=0):
         super(BertEncoder, self).__init__()
         self.prd_n_layer = config.num_hidden_layers
         self.scc_n_layer = scc_n_layer
@@ -28,6 +28,7 @@ class BertEncoder(nn.Module):
         self.output_hidden_states = config.output_hidden_states
         self.layer = nn.ModuleList([BertLayer(config) for _ in range(self.prd_n_layer)])
         self.scc_layer = nn.ModuleList([BertLayer(config) for _ in range(self.scc_n_layer)])
+        self.switch_pattern = 0
 
     def set_replacing_rate(self, replacing_rate):
         if not 0 < replacing_rate <= 1:
@@ -48,7 +49,18 @@ class BertEncoder(nn.Module):
                         inference_layers.append(self.layer[i * self.compress_ratio + offset])
 
         else:  # inference with compressed model
-            inference_layers = self.scc_layer
+            if self.switch_pattern == 0:
+                inference_layers = self.scc_layer
+            elif self.switch_pattern > 0:
+                inference_layers = []
+                pattern = self.switch_pattern
+                for i in range(self.scc_n_layer):  # indeed, it is a six switch model
+                    if pattern % 2 == 1:  # large:
+                        for offset in range(self.compress_ratio):
+                            inference_layers.append(self.layer[i * self.compress_ratio + offset])
+                    else:
+                        inference_layers.append(self.scc_layer[i])
+                    pattern //= 2
 
         for i, layer_module in enumerate(inference_layers):
             if self.output_hidden_states:
@@ -126,12 +138,12 @@ class BertPreTrainedModel(PreTrainedModel):
 
 
 class BertModel(BertPreTrainedModel):
-    def __init__(self, config):
+    def __init__(self, config, switch_pattern=0):
         super(BertModel, self).__init__(config)
         self.config = config
 
         self.embeddings = BertEmbeddings(config)
-        self.encoder = BertEncoder(config)
+        self.encoder = BertEncoder(config, switch_pattern=switch_pattern)
         self.pooler = BertPooler(config)
 
         self.init_weights()
@@ -201,8 +213,6 @@ class BertModel(BertPreTrainedModel):
         return outputs  # sequence_output, pooled_output, (hidden_states), (attentions)
 
 
-
-
 class BertForSequenceClassification(BertPreTrainedModel):
     def __init__(self, config):
         super(BertForSequenceClassification, self).__init__(config)
@@ -213,6 +223,9 @@ class BertForSequenceClassification(BertPreTrainedModel):
         self.classifier = nn.Linear(config.hidden_size, self.config.num_labels)
 
         self.init_weights()
+
+    def set_switch_pattern(self, switch_pattern):
+        self.bert.encoder.switch_pattern = switch_pattern
 
     def forward(self, input_ids=None, attention_mask=None, token_type_ids=None,
                 position_ids=None, head_mask=None, inputs_embeds=None, labels=None):

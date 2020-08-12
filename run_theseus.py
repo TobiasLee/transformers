@@ -69,6 +69,10 @@ class ModelArguments:
         default="none", metadata={"help": "Scheduler function"}
     )
 
+    switch_pattern: Optional[int] = field(
+        default=0, metadata={"help": "Switch pattern when inference, default 0 indicates scc layer"}
+    )
+
     scheduler_linear_k: Optional[float] = field(
         default=0.0, metadata={"help": "linear k for replacement scheduler"}
     )
@@ -154,8 +158,11 @@ def main():
         model_args.model_name_or_path,
         from_tf=bool(".ckpt" in model_args.model_name_or_path),
         config=config,
-        cache_dir=model_args.cache_dir,
+        cache_dir=model_args.cache_dir
     )
+    if model_args.switch_pattern != 0:
+        logger.info("Setting inference path as:%d " % model_args.switch_pattern)
+        model.set_switch_pattern(model_args.switch_pattern)
 
     # Replace rate scheduler
     if model_args.scheduler_type == 'none':
