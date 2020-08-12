@@ -80,6 +80,11 @@ class ModelArguments:
     steps_for_replacing: Optional[int] = field(
         default=0, metadata={"help": "Steps before entering successor fine_tuning (only useful for constant replacing"}
     )
+
+    freeze_teacher: bool = field(
+        default=False, metadata={"help": "freeze predecessor parameters, including layer, embedding, and output & "
+                                         "pooler"}
+    )
     #
     # parser.add_argument("--replacing_rate", type=float, required=True,
     #                     help="Constant replacing rate. Also base replacing rate if using a scheduler.")
@@ -179,6 +184,16 @@ def main():
     scc_n_layer = model.bert.encoder.scc_n_layer
     if training_args.do_train:
         model.bert.encoder.scc_layer = nn.ModuleList([deepcopy(model.bert.encoder.layer[ix]) for ix in range(scc_n_layer)])
+
+    if model_args.freeze_teacher:
+        for p in model.bert.encoder.layer.parameters():
+            p.requires_grad = False
+        for p in model.bert.embeddings.parameters():
+            p.requires_grad = False
+        for p in model.bert.pooler.parameters():
+            p.requires_grad = False
+        for p in model.classifier:
+            p.requires_grad = False
 
     # Get datasets
     train_dataset = (
