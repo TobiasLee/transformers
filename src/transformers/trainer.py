@@ -178,6 +178,7 @@ class Trainer:
             prediction_loss_only=False,
             tb_writer: Optional["SummaryWriter"] = None,
             optimizers: Tuple[torch.optim.Optimizer, torch.optim.lr_scheduler.LambdaLR] = None,
+            theseus_replace_scheduler=None
     ):
         """
         Trainer is a simple but feature-complete training and eval loop for PyTorch,
@@ -198,6 +199,7 @@ class Trainer:
         self.compute_metrics = compute_metrics
         self.prediction_loss_only = prediction_loss_only
         self.optimizers = optimizers
+        self.theseus_replace_scheduler = theseus_replace_scheduler
         if tb_writer is not None:
             self.tb_writer = tb_writer
         elif is_tensorboard_available() and self.is_world_master():
@@ -307,19 +309,19 @@ class Trainer:
         optimizer_grouped_parameters = [
             {
                 "params": [p for n, p in self.model.named_parameters() if not any(nd in n for nd in no_decay)
-                           and "head_predictor" not in n],
+                           ],
                 "weight_decay": self.args.weight_decay,
             },
             {
                 "params": [p for n, p in self.model.named_parameters() if any(nd in n for nd in no_decay)
-                           and "head_predictor" not in n],
+                           ],
                 "weight_decay": 0.0,
             },
-            {
-                "params": [p for n, p in self.model.named_parameters() if "head_predictor" in n],
-                "weight_decay": self.args.weight_decay,
-                "lr": self.args.adaptive_head_predictor_lr
-            },
+            # {
+            #     "params": [p for n, p in self.model.named_parameters() if "head_predictor" in n],
+            #     "weight_decay": self.args.weight_decay,
+            #     "lr": self.args.adaptive_head_predictor_lr
+            # },
         ]
         optimizer = AdamW(optimizer_grouped_parameters, lr=self.args.learning_rate, eps=self.args.adam_epsilon)
         scheduler = get_linear_schedule_with_warmup(
@@ -495,6 +497,8 @@ class Trainer:
                         optimizer.step()
 
                     scheduler.step()
+                    if self.theseus_replace_scheduler is not None:
+                        self.theseus_replace_scheduler.step()
                     model.zero_grad()
 
                     self.global_step += 1
