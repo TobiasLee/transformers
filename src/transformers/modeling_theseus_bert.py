@@ -69,7 +69,7 @@ class BertEncoder(nn.Module):
                         # for offset in range(self.compress_ratio):
                         #     inference_layers.append(self.layer[i * self.compress_ratio + offset])
                     else:
-                        inference_layers.append(base_layers[i])
+                        inference_layers.extend(base_layers[i])
                     pattern //= 2
 
         for i, layer_module in enumerate(inference_layers):
