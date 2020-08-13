@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 class BertEncoder(nn.Module):
-    def __init__(self, config, scc_n_layer=6, switch_pattern=0):
+    def __init__(self, config, scc_n_layer=6, switch_pattern=0, num_parts=6):
         super(BertEncoder, self).__init__()
         self.prd_n_layer = config.num_hidden_layers
         self.scc_n_layer = scc_n_layer
@@ -28,7 +28,8 @@ class BertEncoder(nn.Module):
         self.output_hidden_states = config.output_hidden_states
         self.layer = nn.ModuleList([BertLayer(config) for _ in range(self.prd_n_layer)])
         self.scc_layer = nn.ModuleList([BertLayer(config) for _ in range(self.scc_n_layer)])
-        self.switch_pattern = 0
+        self.switch_pattern = switch_pattern
+        self.num_parts = num_parts
 
     def set_replacing_rate(self, replacing_rate):
         if not 0 < replacing_rate <= 1:
@@ -49,17 +50,26 @@ class BertEncoder(nn.Module):
                         inference_layers.append(self.layer[i * self.compress_ratio + offset])
 
         else:  # inference with compressed model
-            if self.switch_pattern == 0:
+            if self.switch_pattern == 0:  # default setting
                 inference_layers = self.scc_layer
             elif self.switch_pattern > 0:
+                assert self.switch_pattern < 2 ** self.num_parts, "switch pattern idx should ranges from 0 to 2^num_parts -1"
                 inference_layers = []
                 pattern = self.switch_pattern
-                for i in range(self.scc_n_layer):  # indeed, it is a six switch model
+                large_layers, base_layers = [], []
+                large_interval = self.prd_n_layer // self.num_parts  #
+                base_interval = self.scc_n_layer // self.num_parts
+                for i in range(self.num_parts):
+                    large_layers.append(self.layer[i:i+large_interval])
+                    base_layers.append(self.scc_layer[i:i+base_interval])
+
+                for i in range(self.num_parts):  # indeed, it is a six switch model
                     if pattern % 2 == 1:  # large:
-                        for offset in range(self.compress_ratio):
-                            inference_layers.append(self.layer[i * self.compress_ratio + offset])
+                        inference_layers.extend(large_layers[i])
+                        # for offset in range(self.compress_ratio):
+                        #     inference_layers.append(self.layer[i * self.compress_ratio + offset])
                     else:
-                        inference_layers.append(self.scc_layer[i])
+                        inference_layers.append(base_layers[i])
                     pattern //= 2
 
         for i, layer_module in enumerate(inference_layers):

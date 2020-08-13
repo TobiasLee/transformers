@@ -82,6 +82,10 @@ class ModelArguments:
         default=0, metadata={"help": "Steps before entering successor fine_tuning (only useful for constant replacing"}
     )
 
+    num_parts: Optional[int] = field(
+        default=6, metadata={"help": "How many switches in base & large model"}
+    )
+
     freeze_teacher: bool = field(
         default=False, metadata={"help": "freeze predecessor parameters, including layer, embedding, and output & "
                                          "pooler"}
@@ -169,6 +173,9 @@ def main():
     if model_args.switch_pattern != 0:
         logger.info("Setting inference path as:%d " % model_args.switch_pattern)
         model.set_switch_pattern(model_args.switch_pattern)
+    if model_args.num_parts != 6:
+        logger.info("Setting num parts as: %d" % model_args.num_parts)
+        model.bert.encoder.num_parts = model_args.num_parts
 
     # Replace rate scheduler
     if model_args.scheduler_type == 'none':
