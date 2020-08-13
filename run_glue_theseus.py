@@ -186,15 +186,15 @@ def main():
     if training_args.do_train:
         model.bert.encoder.scc_layer = nn.ModuleList([deepcopy(model.bert.encoder.layer[ix]) for ix in range(scc_n_layer)])
 
-    if model_args.freeze_teacher:
-        for p in model.bert.encoder.layer.parameters():
-            p.requires_grad = False
-        for p in model.bert.embeddings.parameters():
-            p.requires_grad = False
-        for p in model.bert.pooler.parameters():
-            p.requires_grad = False
-        for p in model.classifier:
-            p.requires_grad = False
+    # if model_args.freeze_teacher:
+    #     for p in model.bert.encoder.layer.parameters():
+    #         p.requires_grad = False
+    #     for p in model.bert.embeddings.parameters():
+    #         p.requires_grad = False
+    #     for p in model.bert.pooler.parameters():
+    #         p.requires_grad = False
+    #     for p in model.classifier:
+    #         p.requires_grad = False
     # Prepare optimizer and schedule (linear warmup and decay)
     no_decay = ['bias', 'LayerNorm.weight']
     optimizer_grouped_parameters = [
