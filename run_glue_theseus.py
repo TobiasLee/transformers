@@ -26,7 +26,8 @@ from typing import Callable, Dict, Optional
 import numpy as np
 import torch.nn as nn
 
-from transformers import AutoConfig, AutoModelForSequenceClassification, AutoTokenizer, EvalPrediction, GlueDataset
+from transformers import AutoConfig, AutoModelForSequenceClassification, AutoTokenizer, EvalPrediction, GlueDataset, \
+    AdamW, get_linear_schedule_with_warmup
 from transformers.modeling_theseus_bert import BertForSequenceClassification, LinearReplacementScheduler, \
     ConstantReplacementScheduler
 from transformers import GlueDataTrainingArguments as DataTrainingArguments
@@ -194,6 +195,15 @@ def main():
             p.requires_grad = False
         for p in model.classifier:
             p.requires_grad = False
+    # Prepare optimizer and schedule (linear warmup and decay)
+    no_decay = ['bias', 'LayerNorm.weight']
+    optimizer_grouped_parameters = [
+        {'params': [p for n, p in model.bert.encoder.scc_layer.named_parameters() if
+                    not any(nd in n for nd in no_decay)], 'weight_decay': training_args.weight_decay},
+        {'params': [p for n, p in model.bert.encoder.scc_layer.named_parameters() if
+                    any(nd in n for nd in no_decay)], 'weight_decay': 0.0},
+    ]
+
 
     # Get datasets
     train_dataset = (
@@ -227,7 +237,8 @@ def main():
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         compute_metrics=build_compute_metrics_fn(data_args.task_name),
-        theseus_replace_scheduler=replacing_rate_scheduler
+        theseus_replace_scheduler=replacing_rate_scheduler,
+        optimizer_grouped_parameters=optimizer_grouped_parameters
     )
 
     # Training
