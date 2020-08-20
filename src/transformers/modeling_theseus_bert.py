@@ -399,8 +399,14 @@ class BertForSequenceClassification(BertPreTrainedModel):
             if action_probs is not None:
                 bsz = logits.size()[0]
                 final_decision_prob = torch.ones((bsz,), device=input_ids.device)
+                paths = []
                 for path_prob in action_probs:
-                    final_decision_prob *= torch.max(path_prob, dim=-1)[0] # final prob
+                    prob, selected_path = torch.max(path_prob, dim=-1)[0]
+                    final_decision_prob *= prob  # final prob
+                    paths.append(selected_path)
+                if not self.training:
+                    paths = torch.cat(paths, dim=-1)  # bsz, num_parts
+                    print(paths)
                 if self.num_labels != 1:
                     entropy_reward_fct = CrossEntropyLoss(reduction='none')
                     reward = entropy_reward_fct(logits.view(-1, self.num_labels), labels.view(-1))
@@ -409,6 +415,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
                     reward = mse_reward_fct(logits.view(-1), labels.view(-1))
                 class_reward = torch.sum(reward * final_decision_prob)  # sum over bsz
                 loss = loss - class_reward  # minus reward
+
 
             outputs = (loss,) + outputs
 
