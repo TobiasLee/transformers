@@ -401,9 +401,9 @@ class BertForSequenceClassification(BertPreTrainedModel):
                 final_decision_prob = torch.ones((bsz,), device=input_ids.device)
                 paths = []
                 for path_prob in action_probs:
-                    prob, selected_path = torch.max(path_prob, dim=-1)[0]
+                    prob, selected_path = torch.max(path_prob, dim=-1)
                     final_decision_prob *= prob  # final prob
-                    paths.append(selected_path)
+                    paths.append(selected_path.unsqueeze(1))
                 if not self.training:
                     paths = torch.cat(paths, dim=-1)  # bsz, num_parts
                     print(paths)
