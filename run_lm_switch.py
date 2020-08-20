@@ -18,9 +18,6 @@ from transformers import (
     HfArgumentParser,
     Trainer,
     TrainingArguments,
-    glue_compute_metrics,
-    glue_output_modes,
-    glue_tasks_num_labels,
     set_seed,
 )
 
@@ -112,6 +109,13 @@ class ModelArguments:
         metadata={
             "help":
                 "Non-linear TL layers"},
+    )
+
+    mlm_kd: bool = field(
+        default=False,
+        metadata={
+            "help":
+                "KD loss for TL mlm pre-training"},
     )
     config_name: Optional[str] = field(
         default=None, metadata={"help": "Pretrained config name or path if not the same as model_name"}
@@ -323,9 +327,12 @@ def main():
             only_kd_loss=model_args.only_kd_loss,
             non_linear_tl=model_args.non_linear_tl,
             pretrain_mlm=True,
-            config=model_base.config)
+            mlm_kd=model_args.mlm_kd)
     else:
-        if model_args.switch_pattern_idx != -1:
+
+        if model_args.mlm_kd:
+            logger.info("using kd loss for mlm pre-training")
+        elif model_args.switch_pattern_idx != -1:
             logger.info("Running switch pattern %d" % model_args.switch_pattern_idx)
         model = BranchyModel(model_base=model_base, model_large=model_large,
                              switch_rate=0.5,
@@ -341,9 +348,10 @@ def main():
                              only_kd_loss=model_args.only_kd_loss,
                              non_linear_tl=model_args.non_linear_tl,
                              pretrain_mlm=True,
-                             config=model_base.config)
+                             config=model_base.config,
+                             mlm_kd=model_args.mlm_kd)
 
-    logger.info('len tokenizer: %d' %  len(tokenizer))
+    logger.info('len tokenizer: %d' % len(tokenizer))
     model.model_base.resize_token_embeddings(len(tokenizer))
     model.model_large.resize_token_embeddings(len(tokenizer))
 
