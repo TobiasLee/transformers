@@ -94,6 +94,10 @@ class ModelArguments:
     switch_mode: bool = field(
         default=False, metadata={"help": "Auto switch mode"}
     )
+
+    path_penalty_ratio: Optional[float] = field(
+        default=0.0, metadata={"help": "path penalty for selecting large block"}
+    )
     #
     # parser.add_argument("--replacing_rate", type=float, required=True,
     #                     help="Constant replacing rate. Also base replacing rate if using a scheduler.")
@@ -199,6 +203,9 @@ def main():
     if training_args.do_train and not model_args.switch_mode:
         model.bert.encoder.scc_layer = nn.ModuleList([deepcopy(model.bert.encoder.layer[ix]) for ix in range(scc_n_layer)])
 
+    if model_args.path_penalty_ratio > 0:
+        logger.info("setting path penalty to: %.2f" % model_args.path_penalty_ratio)
+        model.set_path_penalty(model_args.path_penalty_ratio)
     # if model_args.freeze_teacher:
     #     for p in model.bert.encoder.layer.parameters():
     #         p.requires_grad = False
