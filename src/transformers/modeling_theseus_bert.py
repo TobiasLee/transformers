@@ -60,8 +60,8 @@ class BertEncoder(nn.Module):
                 large_interval = self.prd_n_layer // self.num_parts  #
                 base_interval = self.scc_n_layer // self.num_parts
                 for i in range(self.num_parts):
-                    large_layers.append(self.layer[i:i+large_interval])
-                    base_layers.append(self.scc_layer[i:i+base_interval])
+                    large_layers.append(self.layer[i*large_interval:i * large_interval+large_interval])
+                    base_layers.append(self.scc_layer[i * base_interval:i * base_interval+base_interval])
 
                 for i in range(self.num_parts):  # indeed, it is a six switch model
                     if pattern % 2 == 1:  # large:
