@@ -111,7 +111,7 @@ class BertEncoder(nn.Module):
                 # print('layer :%d' %i )
                 # print(attention_mask[idx].size())
                 layer_output = layer(layer_hidden_states, attention_mask[idx], None, encoder_hidden_states,
-                                     encoder_attention_mask[idx] if encoder_attention_mask is not None else None )
+                                     encoder_attention_mask[idx] if encoder_attention_mask is not None else None)
                 layer_hidden_states = layer_output[0]
             return layer_hidden_states, layer_output
 
@@ -146,9 +146,13 @@ class BertEncoder(nn.Module):
                 # print('base: ', base_idx)
                 # print('large: ', large_idx)
                 if len(base_input) > 0:
-                    base_hiddens, base_outputs = _run_sub_blocks(base_input, self.scc_layer[i * base_interval :i *base_interval + base_interval], base_idx)
+                    base_hiddens, base_outputs = _run_sub_blocks(base_input, self.scc_layer[
+                                                                             i * base_interval:i * base_interval + base_interval],
+                                                                 base_idx)
                 if len(large_input) > 0:
-                    large_hiddens, large_outputs = _run_sub_blocks(large_input, self.layer[i*large_interval:i * large_interval + large_interval], large_idx)
+                    large_hiddens, large_outputs = _run_sub_blocks(large_input, self.layer[
+                                                                                i * large_interval:i * large_interval + large_interval],
+                                                                   large_idx)
                 if len(base_input) == 0:
                     hidden_states = large_hiddens
                 elif len(large_input) == 0:
@@ -183,9 +187,8 @@ class BertEncoder(nn.Module):
                 large_interval = self.prd_n_layer // self.num_parts  #
                 base_interval = self.scc_n_layer // self.num_parts
                 for i in range(self.num_parts):
-                    large_layers.append(self.layer[i*large_interval:i * large_interval+large_interval])
-                    base_layers.append(self.scc_layer[i * base_interval:i * base_interval+base_interval])
-
+                    large_layers.append(self.layer[i * large_interval:i * large_interval + large_interval])
+                    base_layers.append(self.scc_layer[i * base_interval:i * base_interval + base_interval])
 
                 for i in range(self.num_parts):  # indeed, it is a six switch model
                     if pattern % 2 == 1:  # large:
@@ -360,12 +363,16 @@ class BertForSequenceClassification(BertPreTrainedModel):
         self.classifier = nn.Linear(config.hidden_size, self.config.num_labels)
 
         self.init_weights()
+        self.path_penalty_ratio = 0.0
 
     def set_switch_pattern(self, switch_pattern):
         self.bert.encoder.switch_pattern = switch_pattern
 
     def set_switch_mode(self, switch_mode):
         self.bert.encoder.switch_mode = switch_mode
+
+    def set_path_penalty(self, penalty_ratio):
+        self.path_penalty_ratio = penalty_ratio
 
     def forward(self, input_ids=None, attention_mask=None, token_type_ids=None,
                 position_ids=None, head_mask=None, inputs_embeds=None, labels=None):
@@ -400,13 +407,15 @@ class BertForSequenceClassification(BertPreTrainedModel):
                 bsz = logits.size()[0]
                 final_decision_prob = torch.ones((bsz,), device=input_ids.device)
                 paths = []
+                path_penalty = torch.zeros((bsz,), device=input_ids.device)
                 for path_prob in action_probs:
-                    prob, selected_path = torch.max(path_prob, dim=-1)[0]
+                    prob, selected_path = torch.max(path_prob, dim=-1)
                     final_decision_prob *= prob  # final prob
-                    paths.append(selected_path)
+                    path_penalty += path_prob[:, 1]  # add large block prob as penalty
+                    paths.append(selected_path.unsqueeze(1))
                 if not self.training:
                     paths = torch.cat(paths, dim=-1)  # bsz, num_parts
-                    print(paths)
+                    print(paths[:4])  # sample for some path
                 if self.num_labels != 1:
                     entropy_reward_fct = CrossEntropyLoss(reduction='none')
                     reward = entropy_reward_fct(logits.view(-1, self.num_labels), labels.view(-1))
@@ -414,8 +423,8 @@ class BertForSequenceClassification(BertPreTrainedModel):
                     mse_reward_fct = MSELoss(reduction='none')
                     reward = mse_reward_fct(logits.view(-1), labels.view(-1))
                 class_reward = torch.sum(reward * final_decision_prob)  # sum over bsz
-                loss = loss - class_reward  # minus reward
-
+                path_penalty = self.path_penalty_ratio * torch.sum(path_penalty)
+                loss = loss - class_reward + path_penalty  # minus reward + penalty
 
             outputs = (loss,) + outputs
 
