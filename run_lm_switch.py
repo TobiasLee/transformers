@@ -335,7 +335,7 @@ def main():
             non_linear_tl=model_args.non_linear_tl,
             pretrain_mlm=True,
             mlm_kd=model_args.mlm_kd,
-            config=model_base.config)
+            config=model_base.config,
             iterative_mlm=model_args.iterative_mlm)
     else:
 
