@@ -617,9 +617,8 @@ class BranchyBert(MixedBert):
                  share_tl=False,
                  kd_tl=False,
                  non_linear_tl=False,
-                 mlm_kd=False,
-                 iterative_mlm=False
-                 ):
+                 mlm_kd=False):
+
         super(BranchyBert, self).__init__(model_base, model_large, num_parts,
                                           base_model_name,
                                           large_model_name,
@@ -638,7 +637,6 @@ class BranchyBert(MixedBert):
         self.output_hidden_states = self.model_base.config.output_hidden_states
         self.kd_tl = kd_tl
         self.mlm_kd = mlm_kd
-        self.iterative_mlm = iterative_mlm
 
     def forward(self,
                 input_ids=None,
@@ -790,8 +788,6 @@ class BranchyBert(MixedBert):
         last_block = -1
         tl_pairs = []
 
-        if self.iterative_mlm:
-            switch_pattern_idx = random.choice([i for i in range(1, 2 ** self.num_parts - 1)])
         if switch_pattern_idx != -1:
             for i in range(self.num_parts):
                 if switch_pattern_idx % 2 == 1:  # switch to large
@@ -961,8 +957,7 @@ class BranchyModel(MixedBertForSequenceClassification):
                                         share_tl=share_tl,
                                         kd_tl=kd_tl,
                                         non_linear_tl=non_linear_tl,
-                                        mlm_kd=mlm_kd,
-                                        iterative_mlm=iterative_mlm)
+                                        mlm_kd=mlm_kd)
         self.num_parts = num_parts
 
         self.switch_pattern_idx = switch_pattern_idx
@@ -976,12 +971,14 @@ class BranchyModel(MixedBertForSequenceClassification):
             self.large_lm_head = model_large.lm_head
             self.mlm = True
             self.mlm_kd = mlm_kd
+            self.iterative_mlm = iterative_mlm
         else:
             self.large_classifier = model_large.classifier
             self.base_classifier = model_base.classifier
             self.base_dropout = getattr(self.model_base, 'dropout', None)
             self.large_dropout = getattr(self.model_large, 'dropout', None)
             self.mlm = False
+            self.iterative_mlm = False
 
     def set_pattern_idx(self, pattern_idx):
         self.switch_pattern_idx = pattern_idx
@@ -998,6 +995,10 @@ class BranchyModel(MixedBertForSequenceClassification):
             mlp_mask=None,
             **kwargs,
     ):
+        if self.iterative_mlm:
+            # randomly set switch pattern idx
+            self.switch_pattern_idx = random.choice([i for i in range(1, 2 ** self.num_parts - 1)])
+
         outputs = self.branchy_bert(
             input_ids,
             attention_mask=attention_mask,
@@ -1031,20 +1032,11 @@ class BranchyModel(MixedBertForSequenceClassification):
                         prediction_scores = self.base_lm_head(sequence_output)
                     else:
                         raise Exception("incorrect pattern_idx")
+            outputs = (prediction_scores,) + outputs[2:]  # Add hidden states and attention if they are here
 
-            kd_fct = MSELoss()
-            kd_loss = 0.0
-            if self.mlm_kd and self.training:
-                # add tl kd loss
-                tl_pairs = outputs[1]
-                assert  len(tl_pairs) != 0, "TL pairs cannot be empty"
-                for transformed, original in tl_pairs:
-                    kd_loss += kd_fct(transformed.view(-1), original.view(-1))
-
-            outputs = (prediction_scores,) + outputs[1:]  # Add hidden states and attention if they are here
             if labels is not None:
                 loss_fct = CrossEntropyLoss()
-
+                kd_fct = MSELoss()
                 masked_lm_loss = loss_fct(prediction_scores.view(-1, self.config.vocab_size), labels.view(-1))
                 kd_loss = 0.0
                 if self.mlm_kd and self.training:
