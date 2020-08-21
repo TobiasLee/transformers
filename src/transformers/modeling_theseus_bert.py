@@ -432,7 +432,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
 
                 reward -= self.path_penalty_ratio * path_penalty
                 reward = torch.sum(reward *
-                                                  torch.log(final_decision_prob + 1e-9))  # sum over bsz
+                                   torch.log(final_decision_prob + 1e-9))  # sum over bsz
                 loss = loss - reward  # minus reward + penalty
 
             outputs = (loss,) + outputs
