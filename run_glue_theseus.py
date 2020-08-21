@@ -90,6 +90,14 @@ class ModelArguments:
         default=False, metadata={"help": "freeze predecessor parameters, including layer, embedding, and output & "
                                          "pooler"}
     )
+
+    switch_mode: bool = field(
+        default=False, metadata={"help": "Auto switch mode"}
+    )
+
+    path_penalty_ratio: Optional[float] = field(
+        default=0.0, metadata={"help": "path penalty for selecting large block"}
+    )
     #
     # parser.add_argument("--replacing_rate", type=float, required=True,
     #                     help="Constant replacing rate. Also base replacing rate if using a scheduler.")
@@ -176,6 +184,8 @@ def main():
     if model_args.num_parts != 6:
         logger.info("Setting num parts as: %d" % model_args.num_parts)
         model.bert.encoder.num_parts = model_args.num_parts
+    if model_args.switch_mode:
+        model.set_switch_mode(True) # using switch mode
 
     # Replace rate scheduler
     if model_args.scheduler_type == 'none':
@@ -190,9 +200,12 @@ def main():
         raise ValueError("Unsupported scheduler type: %s" % model_args.scheduler_type)
 
     scc_n_layer = model.bert.encoder.scc_n_layer
-    if training_args.do_train:
+    if training_args.do_train and not model_args.switch_mode:
         model.bert.encoder.scc_layer = nn.ModuleList([deepcopy(model.bert.encoder.layer[ix]) for ix in range(scc_n_layer)])
 
+    if model_args.path_penalty_ratio > 0:
+        logger.info("setting path penalty to: %.2f" % model_args.path_penalty_ratio)
+        model.set_path_penalty(model_args.path_penalty_ratio)
     # if model_args.freeze_teacher:
     #     for p in model.bert.encoder.layer.parameters():
     #         p.requires_grad = False
@@ -210,6 +223,13 @@ def main():
         {'params': [p for n, p in model.bert.encoder.scc_layer.named_parameters() if
                     any(nd in n for nd in no_decay)], 'weight_decay': 0.0},
     ]
+    if model_args.switch_mode:
+        optimizer_grouped_parameters.extend(
+            [{'params': [p for p in model.bert.encoder.base_early_exits.parameters()]},
+             {'params': [p for p in model.bert.encoder.large_early_exits.parameters()]},
+             {'params': [p for p in model.bert.encoder.agent.parameters()]},
+             ]
+        )
 
 
     # Get datasets

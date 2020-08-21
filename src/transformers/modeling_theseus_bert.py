@@ -8,7 +8,7 @@ import torch
 from torch import nn
 from torch.nn import CrossEntropyLoss, MSELoss
 from torch.distributions.bernoulli import Bernoulli
-
+from torch.distributions import Categorical
 from transformers.modeling_utils import PreTrainedModel
 from transformers.configuration_bert import BertConfig
 from transformers.modeling_bert import load_tf_weights_in_bert, BertLayerNorm, BertEmbeddings, BertLayer, BertPooler
@@ -16,8 +16,58 @@ from transformers.modeling_bert import load_tf_weights_in_bert, BertLayerNorm, B
 logger = logging.getLogger(__name__)
 
 
+class EarlyClassifier(nn.Module):
+    r"""A module to provide a shortcut
+    from
+    the output of one non-final BertLayer in BertEncoder
+    to
+    cross-entropy computation in BertForSequenceClassification
+    """
+
+    def __init__(self, config):
+        super(EarlyClassifier, self).__init__()
+        self.pooler = BertPooler(config)
+        self.dropout = nn.Dropout(config.hidden_dropout_prob)
+        self.classifier = nn.Linear(config.hidden_size, config.num_labels)
+
+    def forward(self, encoder_outputs):
+        # Pooler
+        pooler_input = encoder_outputs[0]
+        pooler_output = self.pooler(pooler_input)
+        # "return" pooler_output
+
+        # BertModel
+        bmodel_output = (pooler_input, pooler_output) + encoder_outputs[1:]
+        # "return" bodel_output
+
+        # Dropout and classification
+        pooled_output = bmodel_output[1]
+
+        pooled_output = self.dropout(pooled_output)
+        logits = self.classifier(pooled_output)
+
+        return logits, pooled_output
+
+
+class SwitchAgent(nn.Module):
+    def __init__(self, config, n_action_space=2):
+        super(SwitchAgent, self).__init__()
+        self.pooler = BertPooler(config)
+        self.dropout = nn.Dropout(config.hidden_dropout_prob)
+        self.action_classifier = nn.Linear(config.hidden_size, n_action_space)
+        self.softmax = nn.Softmax(dim=-1)
+
+    def forward(self, hidden_states):
+        # we pooling the hidden states using the first CLS representation
+        pooler_output = self.pooler(hidden_states)
+        pooler_output = self.dropout(pooler_output)
+        action_logit = self.action_classifier(pooler_output)
+        action_prob = self.softmax(action_logit)
+        return action_prob
+
+
 class BertEncoder(nn.Module):
-    def __init__(self, config, scc_n_layer=6, switch_pattern=0, num_parts=6):
+    def __init__(self, config, scc_n_layer=6, switch_pattern=0, num_parts=6, switch_mode=False, n_action_space=2):
         super(BertEncoder, self).__init__()
         self.prd_n_layer = config.num_hidden_layers
         self.scc_n_layer = scc_n_layer
@@ -30,17 +80,42 @@ class BertEncoder(nn.Module):
         self.scc_layer = nn.ModuleList([BertLayer(config) for _ in range(self.scc_n_layer)])
         self.switch_pattern = switch_pattern
         self.num_parts = num_parts
+        self.base_early_exits = nn.ModuleList([EarlyClassifier(config) for _ in range(scc_n_layer)])
+        self.large_early_exits = nn.ModuleList([EarlyClassifier(config) for _ in range(config.num_hidden_layers)])
+        self.switch_mode = switch_mode
+        self.agent = SwitchAgent(config, n_action_space=n_action_space)
 
     def set_replacing_rate(self, replacing_rate):
         if not 0 < replacing_rate <= 1:
             raise Exception('Replace rate must be in the range (0, 1]!')
         self.bernoulli = Bernoulli(torch.tensor([replacing_rate]))
 
+    def init_highway_pooler(self, pooler):
+        # 实际上在 copy 最后一层 pooler
+        loaded_model = pooler.state_dict()
+        for highway in self.base_early_exits:
+            for name, param in highway.pooler.state_dict().items():
+                param.copy_(loaded_model[name])
+
+        for highway in self.large_early_exits:
+            for name, param in highway.pooler.state_dict().items():
+                param.copy_(loaded_model[name])
+
     def forward(self, hidden_states, attention_mask=None, head_mask=None, encoder_hidden_states=None,
                 encoder_attention_mask=None):
         all_hidden_states = ()
         all_attentions = ()
-        if self.training:
+
+        def _run_sub_blocks(layer_hidden_states, layers, idx):
+            for i, layer in enumerate(layers):
+                # print('layer :%d' %i )
+                # print(attention_mask[idx].size())
+                layer_output = layer(layer_hidden_states, attention_mask[idx], None, encoder_hidden_states,
+                                     encoder_attention_mask[idx] if encoder_attention_mask is not None else None)
+                layer_hidden_states = layer_output[0]
+            return layer_hidden_states, layer_output
+
+        if self.training and not self.switch_mode:
             inference_layers = []
             for i in range(self.scc_n_layer):
                 if self.bernoulli.sample() == 1:  # REPLACE
@@ -48,6 +123,62 @@ class BertEncoder(nn.Module):
                 else:  # KEEP the original
                     for offset in range(self.compress_ratio):
                         inference_layers.append(self.layer[i * self.compress_ratio + offset])
+
+        elif self.switch_mode:
+            # training with a switch agent
+            # hidden_states
+            bsz = hidden_states.size()[0]
+            idx = torch.arange(bsz)
+            classifier_indicator = None
+            large_interval = self.prd_n_layer // self.num_parts
+            base_interval = self.scc_n_layer // self.num_parts
+            action_probs = []
+            actions = []
+            for i in range(self.num_parts):
+                # print('num_parts:', i)
+                action_prob = self.agent(hidden_states)
+                action_probs.append(action_prob)
+                # policy gradient
+                m = Categorical(action_prob)
+                action = m.sample()
+                actions.append(action)
+                #$ torch.argmax(action_prob, dim=-1)  # make action based on current hidden state, [bsz, ]
+                base_idx = idx[action == 0]
+                large_idx = idx[action == 1]
+                base_input = hidden_states[base_idx]
+                large_input = hidden_states[large_idx]
+                # print('base: ', base_idx)
+                # print('large: ', large_idx)
+                if len(base_input) > 0:
+                    base_hiddens, base_outputs = _run_sub_blocks(base_input, self.scc_layer[
+                                                                             i * base_interval:i * base_interval + base_interval],
+                                                                 base_idx)
+                if len(large_input) > 0:
+                    large_hiddens, large_outputs = _run_sub_blocks(large_input, self.layer[
+                                                                                i * large_interval:i * large_interval + large_interval],
+                                                                   large_idx)
+                if len(base_input) == 0:
+                    hidden_states = large_hiddens
+                elif len(large_input) == 0:
+                    hidden_states = base_hiddens
+                else:
+                    hidden_states = torch.cat((base_hiddens, large_hiddens), dim=0)
+
+                _, order = torch.sort(torch.cat((base_idx, large_idx), dim=0))
+                hidden_states = hidden_states[order]  # order it back
+                if self.output_hidden_states:
+                    all_hidden_states = all_hidden_states + (
+                        (base_hiddens, large_hiddens),)  # emit for the first hidden states?
+                if self.output_attentions:
+                    all_attentions = all_attentions + ((base_outputs[1], large_outputs[1]),)
+
+            outputs = (hidden_states,)
+            outputs = outputs + (action_probs, actions, )  # action_probs for computing loss
+            if self.output_hidden_states:
+                outputs = outputs + (all_hidden_states,)
+            if self.output_attentions:
+                outputs = outputs + (all_attentions,)
+            return outputs  # last-layer hidden state, action_probs, (all hidden states), (all attentions)
 
         else:  # inference with compressed model
             if self.switch_pattern == 0:  # default setting
@@ -60,8 +191,8 @@ class BertEncoder(nn.Module):
                 large_interval = self.prd_n_layer // self.num_parts  #
                 base_interval = self.scc_n_layer // self.num_parts
                 for i in range(self.num_parts):
-                    large_layers.append(self.layer[i:i+large_interval])
-                    base_layers.append(self.scc_layer[i:i+base_interval])
+                    large_layers.append(self.layer[i * large_interval:i * large_interval + large_interval])
+                    base_layers.append(self.scc_layer[i * base_interval:i * base_interval + base_interval])
 
                 for i in range(self.num_parts):  # indeed, it is a six switch model
                     if pattern % 2 == 1:  # large:
@@ -161,6 +292,9 @@ class BertModel(BertPreTrainedModel):
     def get_input_embeddings(self):
         return self.embeddings.word_embeddings
 
+    def init_highway_pooler(self):
+        self.encoder.init_highway_pooler(self.pooler)
+
     def set_input_embeddings(self, value):
         self.embeddings.word_embeddings = value
 
@@ -233,9 +367,16 @@ class BertForSequenceClassification(BertPreTrainedModel):
         self.classifier = nn.Linear(config.hidden_size, self.config.num_labels)
 
         self.init_weights()
+        self.path_penalty_ratio = 0.0
 
     def set_switch_pattern(self, switch_pattern):
         self.bert.encoder.switch_pattern = switch_pattern
+
+    def set_switch_mode(self, switch_mode):
+        self.bert.encoder.switch_mode = switch_mode
+
+    def set_path_penalty(self, penalty_ratio):
+        self.path_penalty_ratio = penalty_ratio
 
     def forward(self, input_ids=None, attention_mask=None, token_type_ids=None,
                 position_ids=None, head_mask=None, inputs_embeds=None, labels=None):
@@ -248,6 +389,11 @@ class BertForSequenceClassification(BertPreTrainedModel):
                             inputs_embeds=inputs_embeds)
 
         pooled_output = outputs[1]
+        action_probs = None
+        actions = None
+        if self.bert.encoder.switch_mode:
+            action_probs = outputs[2]
+            actions = outputs[3]
 
         pooled_output = self.dropout(pooled_output)
         logits = self.classifier(pooled_output)
@@ -262,6 +408,33 @@ class BertForSequenceClassification(BertPreTrainedModel):
             else:
                 loss_fct = CrossEntropyLoss()
                 loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
+
+            if action_probs is not None:
+                bsz = logits.size()[0]
+                final_decision_prob = torch.ones((bsz,), device=input_ids.device)
+                paths = []
+                path_penalty = torch.zeros((bsz,), device=input_ids.device)
+                for path_prob, action in zip(action_probs, actions):
+                    selected_path = action.unsqueeze(1)
+                    prob = torch.gather(path_prob, dim=-1, index=selected_path)
+                    final_decision_prob *= prob  # final prob
+                    path_penalty += (action + 1 ) # add large block prob as penalty
+                    paths.append(selected_path)
+                if not self.training:
+                    paths = torch.cat(paths, dim=-1)  # bsz, num_parts
+                    print(paths[:4])  # sample for some path
+                if self.num_labels != 1:
+                    entropy_reward_fct = CrossEntropyLoss(reduction='none')
+                    reward = - entropy_reward_fct(logits.view(-1, self.num_labels), labels.view(-1))
+                else:
+                    mse_reward_fct = MSELoss(reduction='none')
+                    reward = - mse_reward_fct(logits.view(-1), labels.view(-1))
+
+                reward -= self.path_penalty_ratio * path_penalty
+                reward = torch.sum(reward *
+                                   torch.log(final_decision_prob + 1e-9))  # sum over bsz
+                loss = loss - reward  # minus reward + penalty
+
             outputs = (loss,) + outputs
 
         return outputs  # (loss), logits, (hidden_states), (attentions)

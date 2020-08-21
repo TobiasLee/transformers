@@ -117,6 +117,13 @@ class ModelArguments:
             "help":
                 "KD loss for TL mlm pre-training"},
     )
+
+    iterative_mlm: bool = field(
+        default=False,
+        metadata={
+            "help":
+                "Random choose a switch pattern for mlm training"},
+    )
     config_name: Optional[str] = field(
         default=None, metadata={"help": "Pretrained config name or path if not the same as model_name"}
     )
@@ -329,6 +336,7 @@ def main():
             pretrain_mlm=True,
             mlm_kd=model_args.mlm_kd,
             config=model_base.config)
+            iterative_mlm=model_args.iterative_mlm)
     else:
 
         if model_args.mlm_kd:
@@ -350,7 +358,8 @@ def main():
                              non_linear_tl=model_args.non_linear_tl,
                              pretrain_mlm=True,
                              config=model_base.config,
-                             mlm_kd=model_args.mlm_kd)
+                             mlm_kd=model_args.mlm_kd,
+                             iterative_mlm=model_args.iterative_mlm)
 
     logger.info('len tokenizer: %d' % len(tokenizer))
     model.model_base.resize_token_embeddings(len(tokenizer))
