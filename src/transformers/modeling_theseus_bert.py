@@ -416,7 +416,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
                 path_penalty = torch.zeros((bsz,), device=input_ids.device)
                 for path_prob, action in zip(action_probs, actions):
                     selected_path = action.unsqueeze(1)
-                    prob = torch.gather(path_prob, dim=-1, index=selected_path)
+                    prob = torch.gather(path_prob, dim=-1, index=selected_path).squeeze()
                     final_decision_prob *= prob  # final prob
                     path_penalty += (action + 1 ) # add large block prob as penalty
                     paths.append(selected_path)
