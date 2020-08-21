@@ -617,7 +617,8 @@ class BranchyBert(MixedBert):
                  share_tl=False,
                  kd_tl=False,
                  non_linear_tl=False,
-                 mlm_kd=False
+                 mlm_kd=False,
+                 iterative_mlm=False
                  ):
         super(BranchyBert, self).__init__(model_base, model_large, num_parts,
                                           base_model_name,
@@ -637,6 +638,7 @@ class BranchyBert(MixedBert):
         self.output_hidden_states = self.model_base.config.output_hidden_states
         self.kd_tl = kd_tl
         self.mlm_kd = mlm_kd
+        self.iterative_mlm = iterative_mlm
 
     def forward(self,
                 input_ids=None,
@@ -724,23 +726,24 @@ class BranchyBert(MixedBert):
                 idx = torch.arange(len(base_hiddens)) > -1
                 for i in range(self.num_parts):
                     base_hiddens, base_outputs = _run_sub_blocks(base_hiddens, self.mixed_encoder.base_parts[i], idx)
-                    large_hiddens, large_outputs = _run_sub_blocks(large_hiddens, self.mixed_encoder.large_parts[i], idx)
+                    large_hiddens, large_outputs = _run_sub_blocks(large_hiddens, self.mixed_encoder.large_parts[i],
+                                                                   idx)
                     blocks_hiddens.append((base_hiddens, large_hiddens))
                     if self.output_hidden_states:
                         all_hidden_states = all_hidden_states + (
                             large_hiddens,)  # emit for the first hidden states?
                     if self.output_attentions:
                         all_attentions = all_attentions + (large_outputs[1],)
-                    outputs = (large_hiddens, )
+                    outputs = (large_hiddens,)
                 pairs = []
-                for i in range(self.num_parts-1):
+                for i in range(self.num_parts - 1):
                     # note the index need to be careful, to cooperate with switch path code
                     base_hidden, large_hidden = blocks_hiddens[i]
-                    transformed_base_hidden = self.mixed_encoder.hi2lo_layers[i+1](large_hidden)
-                    transformed_large_hidden = self.mixed_encoder.lo2hi_layers[i+1](base_hidden)
+                    transformed_base_hidden = self.mixed_encoder.hi2lo_layers[i + 1](large_hidden)
+                    transformed_large_hidden = self.mixed_encoder.lo2hi_layers[i + 1](base_hidden)
                     pairs.append((transformed_base_hidden, base_hidden))
                     pairs.append((transformed_large_hidden, large_hidden))
-                outputs = outputs + (pairs, )
+                outputs = outputs + (pairs,)
                 if self.output_hidden_states:
                     outputs = outputs + (all_hidden_states,)
                 if self.output_attentions:
@@ -758,13 +761,12 @@ class BranchyBert(MixedBert):
                             hidden_states,)  # emit for the first hidden states?
                     if self.output_attentions:
                         all_attentions = all_attentions + (layer_outputs[1],)
-                outputs = (hidden_states, )
+                outputs = (hidden_states,)
                 if self.output_hidden_states:
                     outputs = outputs + (all_hidden_states,)
                 if self.output_attentions:
                     outputs = outputs + (all_attentions,)
                 return outputs
-
 
         if self.training and self.kd_tl:  # only in training mode
             base_hiddens = base_embedding_output
@@ -787,6 +789,9 @@ class BranchyBert(MixedBert):
         logits = []
         last_block = -1
         tl_pairs = []
+
+        if self.iterative_mlm:
+            switch_pattern_idx = random.choice([i for i in range(1, 2 ** self.num_parts - 1)])
         if switch_pattern_idx != -1:
             for i in range(self.num_parts):
                 if switch_pattern_idx % 2 == 1:  # switch to large
@@ -943,7 +948,8 @@ class BranchyModel(MixedBertForSequenceClassification):
                  non_linear_tl=False,
                  pretrain_mlm=False,
                  config=RobertaConfig(),
-                 mlm_kd=False):
+                 mlm_kd=False,
+                 iterative_mlm=False):
         super(BranchyModel, self).__init__(model_base, model_large, config=config)
         self.base_model_name = base_model_name
         self.large_model_name = large_model_name
@@ -955,7 +961,8 @@ class BranchyModel(MixedBertForSequenceClassification):
                                         share_tl=share_tl,
                                         kd_tl=kd_tl,
                                         non_linear_tl=non_linear_tl,
-                                        mlm_kd=mlm_kd)
+                                        mlm_kd=mlm_kd,
+                                        iterative_mlm=iterative_mlm)
         self.num_parts = num_parts
 
         self.switch_pattern_idx = switch_pattern_idx
@@ -1034,7 +1041,7 @@ class BranchyModel(MixedBertForSequenceClassification):
                 if self.mlm_kd and self.training:
                     # add tl kd loss
                     tl_pairs = outputs[1]
-                    assert  len(tl_pairs) != 0, "TL pairs cannot be empty"
+                    assert len(tl_pairs) != 0, "TL pairs cannot be empty"
                     for transformed, original in tl_pairs:
                         kd_loss += kd_fct(transformed.view(-1), original.view(-1))
                 outputs = (masked_lm_loss + kd_loss,) + outputs
