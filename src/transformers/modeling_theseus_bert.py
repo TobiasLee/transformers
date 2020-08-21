@@ -139,8 +139,11 @@ class BertEncoder(nn.Module):
                 action_prob = self.agent(hidden_states)
                 action_probs.append(action_prob)
                 # policy gradient
-                m = Categorical(action_prob)
-                action = m.sample()
+                if self.training:
+                    m = Categorical(action_prob)
+                    action = m.sample()
+                else:
+                    action = torch.argmax(action_prob, dim=-1)
                 actions.append(action)
                 #$ torch.argmax(action_prob, dim=-1)  # make action based on current hidden state, [bsz, ]
                 base_idx = idx[action == 0]
