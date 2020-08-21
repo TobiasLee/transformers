@@ -327,7 +327,8 @@ def main():
             only_kd_loss=model_args.only_kd_loss,
             non_linear_tl=model_args.non_linear_tl,
             pretrain_mlm=True,
-            mlm_kd=model_args.mlm_kd)
+            mlm_kd=model_args.mlm_kd,
+            config=model_base.config)
     else:
 
         if model_args.mlm_kd:

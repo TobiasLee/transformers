@@ -1024,19 +1024,22 @@ class BranchyModel(MixedBertForSequenceClassification):
                         prediction_scores = self.base_lm_head(sequence_output)
                     else:
                         raise Exception("incorrect pattern_idx")
-            outputs = (prediction_scores,) + outputs[2:]  # Add hidden states and attention if they are here
 
+            kd_fct = MSELoss()
+            kd_loss = 0.0
+            if self.mlm_kd and self.training:
+                # add tl kd loss
+                tl_pairs = outputs[1]
+                assert  len(tl_pairs) != 0, "TL pairs cannot be empty"
+                for transformed, original in tl_pairs:
+                    kd_loss += kd_fct(transformed.view(-1), original.view(-1))
+
+            outputs = (prediction_scores,) + outputs[1:]  # Add hidden states and attention if they are here
             if labels is not None:
                 loss_fct = CrossEntropyLoss()
-                kd_fct = MSELoss()
+
                 masked_lm_loss = loss_fct(prediction_scores.view(-1, self.config.vocab_size), labels.view(-1))
-                kd_loss = 0.0
-                if self.mlm_kd and self.training:
-                    # add tl kd loss
-                    tl_pairs = outputs[1]
-                    assert  len(tl_pairs) != 0, "TL pairs cannot be empty"
-                    for transformed, original in tl_pairs:
-                        kd_loss += kd_fct(transformed.view(-1), original.view(-1))
+
                 outputs = (masked_lm_loss + kd_loss,) + outputs
 
             return outputs  # (masked_lm_loss), prediction_scores, (hidden_states), (attentions)
