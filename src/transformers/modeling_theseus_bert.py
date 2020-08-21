@@ -8,7 +8,7 @@ import torch
 from torch import nn
 from torch.nn import CrossEntropyLoss, MSELoss
 from torch.distributions.bernoulli import Bernoulli
-
+from torch.distributions import Categorical
 from transformers.modeling_utils import PreTrainedModel
 from transformers.configuration_bert import BertConfig
 from transformers.modeling_bert import load_tf_weights_in_bert, BertLayerNorm, BertEmbeddings, BertLayer, BertPooler
@@ -133,12 +133,16 @@ class BertEncoder(nn.Module):
             large_interval = self.prd_n_layer // self.num_parts
             base_interval = self.scc_n_layer // self.num_parts
             action_probs = []
+            actions = []
             for i in range(self.num_parts):
                 # print('num_parts:', i)
                 action_prob = self.agent(hidden_states)
                 action_probs.append(action_prob)
-                action = torch.argmax(action_prob,
-                                      dim=-1)  # make action based on current hidden state, [bsz, ]
+                # policy gradient
+                m = Categorical(action_prob)
+                action = m.sample()
+                actions.append(action)
+                #$ torch.argmax(action_prob, dim=-1)  # make action based on current hidden state, [bsz, ]
                 base_idx = idx[action == 0]
                 large_idx = idx[action == 1]
                 base_input = hidden_states[base_idx]
@@ -169,7 +173,7 @@ class BertEncoder(nn.Module):
                     all_attentions = all_attentions + ((base_outputs[1], large_outputs[1]),)
 
             outputs = (hidden_states,)
-            outputs = outputs + (action_probs,)  # action_probs for computing loss
+            outputs = outputs + (action_probs, actions, )  # action_probs for computing loss
             if self.output_hidden_states:
                 outputs = outputs + (all_hidden_states,)
             if self.output_attentions:
@@ -386,8 +390,10 @@ class BertForSequenceClassification(BertPreTrainedModel):
 
         pooled_output = outputs[1]
         action_probs = None
+        actions = None
         if self.bert.encoder.switch_mode:
             action_probs = outputs[2]
+            actions = outputs[3]
 
         pooled_output = self.dropout(pooled_output)
         logits = self.classifier(pooled_output)
@@ -408,11 +414,12 @@ class BertForSequenceClassification(BertPreTrainedModel):
                 final_decision_prob = torch.ones((bsz,), device=input_ids.device)
                 paths = []
                 path_penalty = torch.zeros((bsz,), device=input_ids.device)
-                for path_prob in action_probs:
-                    prob, selected_path = torch.max(path_prob, dim=-1)
+                for path_prob, action in zip(action_probs, actions):
+                    selected_path = action.unsqueeze(1)
+                    prob = torch.gather(path_prob, dim=-1, index=selected_path)
                     final_decision_prob *= prob  # final prob
-                    path_penalty += path_prob[:, 1]  # add large block prob as penalty
-                    paths.append(selected_path.unsqueeze(1))
+                    path_penalty += (action + 1 ) # add large block prob as penalty
+                    paths.append(selected_path)
                 if not self.training:
                     paths = torch.cat(paths, dim=-1)  # bsz, num_parts
                     print(paths[:4])  # sample for some path
@@ -422,8 +429,10 @@ class BertForSequenceClassification(BertPreTrainedModel):
                 else:
                     mse_reward_fct = MSELoss(reduction='none')
                     reward = - mse_reward_fct(logits.view(-1), labels.view(-1))
-                classification_reward = torch.sum(reward * final_decision_prob)  # sum over bsz
-                path_penalty = self.path_penalty_ratio * torch.sum(path_penalty)
+
+                reward -= self.path_penalty_ratio * path_penalty
+                classification_reward = torch.sum(reward *
+                                                  torch.log(final_decision_prob + 1e-9))  # sum over bsz
                 loss = loss - classification_reward + path_penalty  # minus reward + penalty
 
             outputs = (loss,) + outputs
