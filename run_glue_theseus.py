@@ -91,6 +91,10 @@ class ModelArguments:
                                          "pooler"}
     )
 
+    train_scc_layer: bool = field(
+        default=False, metadata={"help": "train scc layer"}
+    )
+
     switch_mode: bool = field(
         default=False, metadata={"help": "Auto switch mode"}
     )
@@ -98,6 +102,8 @@ class ModelArguments:
     path_penalty_ratio: Optional[float] = field(
         default=0.0, metadata={"help": "path penalty for selecting large block"}
     )
+
+
     #
     # parser.add_argument("--replacing_rate", type=float, required=True,
     #                     help="Constant replacing rate. Also base replacing rate if using a scheduler.")
@@ -217,12 +223,14 @@ def main():
     #         p.requires_grad = False
     # Prepare optimizer and schedule (linear warmup and decay)
     no_decay = ['bias', 'LayerNorm.weight']
-    optimizer_grouped_parameters = [
-        {'params': [p for n, p in model.bert.encoder.scc_layer.named_parameters() if
-                    not any(nd in n for nd in no_decay)], 'weight_decay': training_args.weight_decay},
-        {'params': [p for n, p in model.bert.encoder.scc_layer.named_parameters() if
-                    any(nd in n for nd in no_decay)], 'weight_decay': 0.0},
-    ]
+    optimizer_grouped_parameters = []
+    if model_args.train_scc_layer:
+        optimizer_grouped_parameters.extend([
+            {'params': [p for n, p in model.bert.encoder.scc_layer.named_parameters() if
+                        not any(nd in n for nd in no_decay)], 'weight_decay': training_args.weight_decay},
+            {'params': [p for n, p in model.bert.encoder.scc_layer.named_parameters() if
+                        any(nd in n for nd in no_decay)], 'weight_decay': 0.0},
+        ])
     if model_args.switch_mode:
         optimizer_grouped_parameters.extend(
             [{'params': [p for p in model.bert.encoder.base_early_exits.parameters()]},
