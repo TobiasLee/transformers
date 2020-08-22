@@ -38,7 +38,7 @@ class EarlyClassifier(nn.Module):
         pooled_output = self.dropout(pooler_output)
         logits = self.classifier(pooled_output)
 
-        return logits, pooled_output
+        return logits
 
 
 class SwitchAgent(nn.Module):
@@ -87,7 +87,7 @@ class BertEncoder(nn.Module):
         # 实际上在 copy 最后一层 pooler
         loaded_model = pooler.state_dict()
         for highway in self.early_classifiers:
-            for name, param in highway.state_dict().items():
+            for name, param in highway.pooler.state_dict().items():
                 param.copy_(loaded_model[name])
         for highway in self.base_early_exits:
             for name, param in highway.pooler.state_dict().items():
@@ -142,7 +142,7 @@ class BertEncoder(nn.Module):
                 actions.append(action)
 
                 # internal  logit for training early exits
-                internal_classifier_logit = self.early_clasifiers[i](hidden_states)
+                internal_classifier_logit = self.early_classifiers[i](hidden_states)
                 internal_classifier_logits.append(internal_classifier_logit)
                 exit_idx = left_idx[action == 2]  # using 2 for current code
                 if len(exit_idx) > 0:
@@ -403,9 +403,9 @@ class BertForSequenceClassification(BertPreTrainedModel):
         left_idx = None
         early_exit_pairs, internal_classifier_logits = [], []
         if self.bert.encoder.switch_mode:
-            left_idx = outputs[2]
-            action_probs = outputs[3]
-            actions = outputs[4]
+            action_probs = outputs[2]
+            actions = outputs[3]
+            left_idx = outputs[4]
             early_exit_pairs = outputs[5]
             internal_classifier_logits = outputs[6]
 
@@ -414,9 +414,9 @@ class BertForSequenceClassification(BertPreTrainedModel):
 
         early_exit_logit = torch.cat([p[0] for p in early_exit_pairs], dim=0)
         early_exit_idx = torch.cat([p[1] for p in early_exit_pairs], dim=0)
-
         total_idx = torch.cat([early_exit_idx, left_idx], dim=0)
         _, order = torch.sort(total_idx)
+
         logits = torch.cat([early_exit_logit, logits], dim=0)[order]
 
         outputs = (logits,) + outputs[2:]  # add hidden states and attention if they are here
