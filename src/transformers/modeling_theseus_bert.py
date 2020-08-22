@@ -30,20 +30,12 @@ class EarlyClassifier(nn.Module):
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
         self.classifier = nn.Linear(config.hidden_size, config.num_labels)
 
-    def forward(self, encoder_outputs):
+    def forward(self, hidden_states):
         # Pooler
-        pooler_input = encoder_outputs[0]
-        pooler_output = self.pooler(pooler_input)
+        pooler_output = self.pooler(hidden_states)
         # "return" pooler_output
 
-        # BertModel
-        bmodel_output = (pooler_input, pooler_output) + encoder_outputs[1:]
-        # "return" bodel_output
-
-        # Dropout and classification
-        pooled_output = bmodel_output[1]
-
-        pooled_output = self.dropout(pooled_output)
+        pooled_output = self.dropout(pooler_output)
         logits = self.classifier(pooled_output)
 
         return logits, pooled_output
@@ -67,7 +59,7 @@ class SwitchAgent(nn.Module):
 
 
 class BertEncoder(nn.Module):
-    def __init__(self, config, scc_n_layer=6, switch_pattern=0, num_parts=6, switch_mode=False, n_action_space=2):
+    def __init__(self, config, scc_n_layer=6, switch_pattern=0, num_parts=6, switch_mode=False, n_action_space=3):
         super(BertEncoder, self).__init__()
         self.prd_n_layer = config.num_hidden_layers
         self.scc_n_layer = scc_n_layer
@@ -82,6 +74,7 @@ class BertEncoder(nn.Module):
         self.num_parts = num_parts
         self.base_early_exits = nn.ModuleList([EarlyClassifier(config) for _ in range(scc_n_layer)])
         self.large_early_exits = nn.ModuleList([EarlyClassifier(config) for _ in range(config.num_hidden_layers)])
+        self.early_classifiers = nn.ModuleList([EarlyClassifier(config) for _ in range(self.scc_n_layer)])
         self.switch_mode = switch_mode
         self.agent = SwitchAgent(config, n_action_space=n_action_space)
 
@@ -93,6 +86,9 @@ class BertEncoder(nn.Module):
     def init_highway_pooler(self, pooler):
         # 实际上在 copy 最后一层 pooler
         loaded_model = pooler.state_dict()
+        for highway in self.early_classifiers:
+            for name, param in highway.state_dict().items():
+                param.copy_(loaded_model[name])
         for highway in self.base_early_exits:
             for name, param in highway.pooler.state_dict().items():
                 param.copy_(loaded_model[name])
@@ -125,36 +121,45 @@ class BertEncoder(nn.Module):
                         inference_layers.append(self.layer[i * self.compress_ratio + offset])
 
         elif self.switch_mode:
-            # training with a switch agent
-            # hidden_states
             bsz = hidden_states.size()[0]
-            idx = torch.arange(bsz)
-            classifier_indicator = None
+            left_idx = torch.arange(bsz)
             large_interval = self.prd_n_layer // self.num_parts
             base_interval = self.scc_n_layer // self.num_parts
+            # training with a switch agent
             action_probs = []
             actions = []
+            internal_classifier_logits = []
+            exited_logit_pairs = []
             for i in range(self.num_parts):
-                # print('num_parts:', i)
                 action_prob = self.agent(hidden_states)
                 action_probs.append(action_prob)
                 # policy gradient
                 if self.training:
                     m = Categorical(action_prob)
                     action = m.sample()
-                else:
+                else:  # during evaluation, we do not sample but using the argmax for path selection
                     action = torch.argmax(action_prob, dim=-1)
                 actions.append(action)
-                #$ torch.argmax(action_prob, dim=-1)  # make action based on current hidden state, [bsz, ]
-                base_idx = idx[action == 0]
-                large_idx = idx[action == 1]
-                base_input = hidden_states[base_idx]
-                large_input = hidden_states[large_idx]
-                # print('base: ', base_idx)
-                # print('large: ', large_idx)
+
+                # internal  logit for training early exits
+                internal_classifier_logit = self.early_clasifiers[i](hidden_states)
+                internal_classifier_logits.append(internal_classifier_logit)
+                exit_idx = left_idx[action == 2]  # using 2 for current code
+                if len(exit_idx) > 0:
+                    exited_logit = internal_classifier_logit[action == 2]
+                    exited_logit_pairs.append((exited_logit, exit_idx))
+
+                #  to implement acceleration, exited examples are not supposed to continue the forward loop
+
+                base_idx = left_idx[action == 0]
+                large_idx = left_idx[action == 1]
+                base_input = hidden_states[action == 0]
+                large_input = hidden_states[action == 1]
+
                 if len(base_input) > 0:
-                    base_hiddens, base_outputs = _run_sub_blocks(base_input, self.scc_layer[
-                                                                             i * base_interval:i * base_interval + base_interval],
+                    base_hiddens, base_outputs = _run_sub_blocks(base_input,
+                                                                 self.scc_layer[
+                                                                 i * base_interval:i * base_interval + base_interval],
                                                                  base_idx)
                 if len(large_input) > 0:
                     large_hiddens, large_outputs = _run_sub_blocks(large_input, self.layer[
@@ -166,9 +171,10 @@ class BertEncoder(nn.Module):
                     hidden_states = base_hiddens
                 else:
                     hidden_states = torch.cat((base_hiddens, large_hiddens), dim=0)
+                sorted_idx, order = torch.sort(torch.cat((base_idx, large_idx), dim=0))
+                left_idx = sorted_idx
+                hidden_states = hidden_states[order]  # order left hidden it back
 
-                _, order = torch.sort(torch.cat((base_idx, large_idx), dim=0))
-                hidden_states = hidden_states[order]  # order it back
                 if self.output_hidden_states:
                     all_hidden_states = all_hidden_states + (
                         (base_hiddens, large_hiddens),)  # emit for the first hidden states?
@@ -176,7 +182,7 @@ class BertEncoder(nn.Module):
                     all_attentions = all_attentions + ((base_outputs[1], large_outputs[1]),)
 
             outputs = (hidden_states,)
-            outputs = outputs + (action_probs, actions, )  # action_probs for computing loss
+            outputs = outputs + (action_probs, actions, left_idx, exited_logit_pairs, internal_classifier_logits, )  # action_probs for computing loss
             if self.output_hidden_states:
                 outputs = outputs + (all_hidden_states,)
             if self.output_attentions:
@@ -394,12 +400,24 @@ class BertForSequenceClassification(BertPreTrainedModel):
         pooled_output = outputs[1]
         action_probs = None
         actions = None
+        left_idx = None
+        early_exit_pairs, internal_classifier_logits = [], []
         if self.bert.encoder.switch_mode:
-            action_probs = outputs[2]
-            actions = outputs[3]
+            left_idx = outputs[2]
+            action_probs = outputs[3]
+            actions = outputs[4]
+            early_exit_pairs = outputs[5]
+            internal_classifier_logits = outputs[6]
 
         pooled_output = self.dropout(pooled_output)
         logits = self.classifier(pooled_output)
+
+        early_exit_logit = torch.cat([p[0] for p in early_exit_pairs], dim=0)
+        early_exit_idx = torch.cat([p[1] for p in early_exit_pairs], dim=0)
+
+        total_idx = torch.cat([early_exit_idx, left_idx], dim=0)
+        _, order = torch.sort(total_idx)
+        logits = torch.cat([early_exit_logit, logits], dim=0)[order]
 
         outputs = (logits,) + outputs[2:]  # add hidden states and attention if they are here
 
@@ -413,6 +431,17 @@ class BertForSequenceClassification(BertPreTrainedModel):
                 loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
 
             if action_probs is not None:
+                internal_loss = None
+                weights = 0.0
+                # internal classifier loss
+                for i, logits in enumerate(internal_classifier_logits):
+                    if internal_loss is None:
+                        internal_loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
+                    else:
+                        internal_loss += (i+1) * loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
+                    weights += i + 1
+                internal_loss = internal_loss / weights if internal_loss is not None else 0.0
+
                 bsz = logits.size()[0]
                 final_decision_prob = torch.ones((bsz,), device=input_ids.device)
                 paths = []
@@ -421,10 +450,11 @@ class BertForSequenceClassification(BertPreTrainedModel):
                     selected_path = action.unsqueeze(1)
                     prob = torch.gather(path_prob, dim=-1, index=selected_path).squeeze()
                     final_decision_prob *= prob  # final prob
-                    path_penalty += (action + 1 ) # add large block prob as penalty
+                    path_penalty += (action + 1)  # add large block prob as penalty
                     paths.append(selected_path)
                 if not self.training:
                     paths = torch.cat(paths, dim=-1)  # bsz, num_parts
+                    # we can add an expected saving computation here
                     print(paths[:4])  # sample for some path
                 if self.num_labels != 1:
                     entropy_reward_fct = CrossEntropyLoss(reduction='none')
