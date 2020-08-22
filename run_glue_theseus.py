@@ -91,8 +91,8 @@ class ModelArguments:
                                          "pooler"}
     )
 
-    train_scc_layer: bool = field(
-        default=False, metadata={"help": "train scc layer"}
+    fix_scc_layer: bool = field(
+        default=False, metadata={"help": "fix  scc layer"}
     )
 
     switch_mode: bool = field(
@@ -224,7 +224,7 @@ def main():
     # Prepare optimizer and schedule (linear warmup and decay)
     no_decay = ['bias', 'LayerNorm.weight']
     optimizer_grouped_parameters = []
-    if model_args.train_scc_layer:
+    if not model_args.fix_scc_layer:
         optimizer_grouped_parameters.extend([
             {'params': [p for n, p in model.bert.encoder.scc_layer.named_parameters() if
                         not any(nd in n for nd in no_decay)], 'weight_decay': training_args.weight_decay},
