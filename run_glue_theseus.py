@@ -95,6 +95,10 @@ class ModelArguments:
         default=False, metadata={"help": "fix  scc layer"}
     )
 
+    early_exit: bool = field(
+        default=False, metadata={"help": "add early exit branch"}
+    )
+
     switch_mode: bool = field(
         default=False, metadata={"help": "Auto switch mode"}
     )
@@ -192,6 +196,8 @@ def main():
         model.bert.encoder.num_parts = model_args.num_parts
     if model_args.switch_mode:
         model.set_switch_mode(True) # using switch mode
+    if model_args.early_exit:
+        model.init_highway_pooler()
 
     # Replace rate scheduler
     if model_args.scheduler_type == 'none':
