@@ -144,7 +144,7 @@ class BertEncoder(nn.Module):
                                                               self.scc_layer[
                                                               i * base_interval:i * base_interval + base_interval],
                                                               left_idx)
-                    internal_large_hidden, _ = _run_sub_blocks(internal_base_hidden,
+                    internal_large_hidden, _ = _run_sub_blocks(internal_large_hidden,
                                                                self.layer[
                                                                i * large_interval:i * large_interval + large_interval],
                                                                left_idx)
@@ -164,7 +164,7 @@ class BertEncoder(nn.Module):
 
                 exit_idx = left_idx[action == 0]  # using 0 for current code
                 if len(exit_idx) > 0:
-                    exited_logit = self.early_classifiers[i](hidden_states)[action == 2]
+                    exited_logit = self.early_classifiers[i](hidden_states)[action == 0]
                     exited_logit_pairs.append((exited_logit, exit_idx))
 
                 #  to implement acceleration, exited examples are not supposed to continue the forward loop
@@ -470,14 +470,13 @@ class BertForSequenceClassification(BertPreTrainedModel):
                 for path_prob, action, action_idx in zip(action_probs, actions, action_idxs):
                     selected_path = action.unsqueeze(1)
                     prob = torch.gather(path_prob, dim=-1, index=selected_path).squeeze()
-                    padded_prob = torch.ones((bsz,))
+                    padded_prob = torch.ones((bsz,), device=input_ids.device)
                     padded_prob[action_idx] = prob
                     final_decision_prob *= padded_prob  # final prob
-                    padded_path = torch.zeros((bsz,))
+                    padded_path = torch.zeros((bsz,), device=input_ids.device, dtype=torch.long)
                     padded_path[action_idx] = action
                     path_penalty += padded_path  # add large block prob as penalty
                     paths.append(padded_path.unsqueeze(1))
-
                 if not self.training:
                     paths = torch.cat(paths, dim=-1)  # bsz, num_parts
                     # we can add an expected saving computation here
@@ -494,7 +493,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
                 reward -= self.path_penalty_ratio * path_penalty
                 reward = torch.sum(reward *
                                    torch.log(final_decision_prob + 1e-9))  # sum over bsz
-                loss = loss - reward  # minus reward + penalty
+                loss = loss + internal_loss  - reward  # minus reward + penalty
 
             outputs = (loss,) + outputs
 
