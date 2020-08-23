@@ -477,6 +477,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
                     padded_path[action_idx] = action
                     path_penalty += padded_path  # add large block prob as penalty
                     paths.append(padded_path.unsqueeze(1))
+                    del padded_path
                 if not self.training:
                     paths = torch.cat(paths, dim=-1)  # bsz, num_parts
                     # we can add an expected saving computation here
@@ -493,8 +494,8 @@ class BertForSequenceClassification(BertPreTrainedModel):
                 reward -= self.path_penalty_ratio * path_penalty
                 reward = torch.sum(reward *
                                    torch.log(final_decision_prob + 1e-9))  # sum over bsz
-                loss = loss + internal_loss  - reward  # minus reward + penalty
-
+                loss = loss + internal_loss - reward  # minus reward + penalty
+                del paths 
             outputs = (loss,) + outputs
 
         return outputs  # (loss), logits, (hidden_states), (attentions)
