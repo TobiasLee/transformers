@@ -129,6 +129,25 @@ class BertEncoder(nn.Module):
             action_probs = []
             actions = []
             internal_classifier_logits = []
+
+            if self.training:  #
+                internal_base_hidden, internal_large_hidden = hidden_states, hidden_states
+
+                for i in range(self.num_parts):
+                    # internal  logit for training early exits
+                    internal_base_logit = self.early_classifiers[i](internal_base_hidden)
+                    internal_large_logit = self.early_classifiers[i](internal_large_hidden)
+                    internal_classifier_logits.append(internal_base_logit)
+                    internal_classifier_logits.append(internal_large_logit)
+                    internal_base_hidden, _ = _run_sub_blocks(internal_base_hidden,
+                                                              self.scc_layer[
+                                                              i * base_interval:i * base_interval + base_interval],
+                                                              left_idx)
+                    internal_large_hidden, _ = _run_sub_blocks(internal_base_hidden,
+                                                               self.layer[
+                                                               i * large_interval:i * large_interval + large_interval],
+                                                               left_idx)
+
             exited_logit_pairs = []
             for i in range(self.num_parts):
                 action_prob = self.agent(hidden_states)
@@ -141,12 +160,9 @@ class BertEncoder(nn.Module):
                     action = torch.argmax(action_prob, dim=-1)
                 actions.append(action)
 
-                # internal  logit for training early exits
-                internal_classifier_logit = self.early_classifiers[i](hidden_states)
-                internal_classifier_logits.append(internal_classifier_logit)
                 exit_idx = left_idx[action == 2]  # using 2 for current code
                 if len(exit_idx) > 0:
-                    exited_logit = internal_classifier_logit[action == 2]
+                    exited_logit = self.early_classifiers[i](hidden_states)[action == 2]
                     exited_logit_pairs.append((exited_logit, exit_idx))
 
                 #  to implement acceleration, exited examples are not supposed to continue the forward loop
@@ -182,7 +198,8 @@ class BertEncoder(nn.Module):
                     all_attentions = all_attentions + ((base_outputs[1], large_outputs[1]),)
 
             outputs = (hidden_states,)
-            outputs = outputs + (action_probs, actions, left_idx, exited_logit_pairs, internal_classifier_logits, )  # action_probs for computing loss
+            outputs = outputs + (action_probs, actions, left_idx, exited_logit_pairs,
+                                 internal_classifier_logits,)  # action_probs for computing loss
             if self.output_hidden_states:
                 outputs = outputs + (all_hidden_states,)
             if self.output_attentions:
@@ -438,7 +455,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
                     if internal_loss is None:
                         internal_loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
                     else:
-                        internal_loss += (i+1) * loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
+                        internal_loss += (i + 1) * loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
                     weights += i + 1
                 internal_loss = internal_loss / weights if internal_loss is not None else 0.0
 
