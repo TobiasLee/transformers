@@ -72,8 +72,8 @@ class BertEncoder(nn.Module):
         self.scc_layer = nn.ModuleList([BertLayer(config) for _ in range(self.scc_n_layer)])
         self.switch_pattern = switch_pattern
         self.num_parts = num_parts
-        self.base_early_exits = nn.ModuleList([EarlyClassifier(config) for _ in range(scc_n_layer)])
-        self.large_early_exits = nn.ModuleList([EarlyClassifier(config) for _ in range(config.num_hidden_layers)])
+        # self.base_early_exits = nn.ModuleList([EarlyClassifier(config) for _ in range(scc_n_layer)])
+        # self.large_early_exits = nn.ModuleList([EarlyClassifier(config) for _ in range(config.num_hidden_layers)])
         self.early_classifiers = nn.ModuleList([EarlyClassifier(config) for _ in range(self.scc_n_layer)])
         self.switch_mode = switch_mode
         self.agent = SwitchAgent(config, n_action_space=n_action_space)
@@ -89,13 +89,13 @@ class BertEncoder(nn.Module):
         for highway in self.early_classifiers:
             for name, param in highway.pooler.state_dict().items():
                 param.copy_(loaded_model[name])
-        for highway in self.base_early_exits:
-            for name, param in highway.pooler.state_dict().items():
-                param.copy_(loaded_model[name])
-
-        for highway in self.large_early_exits:
-            for name, param in highway.pooler.state_dict().items():
-                param.copy_(loaded_model[name])
+        # for highway in self.base_early_exits:
+        #     for name, param in highway.pooler.state_dict().items():
+        #         param.copy_(loaded_model[name])
+        #
+        # for highway in self.large_early_exits:
+        #     for name, param in highway.pooler.state_dict().items():
+        #         param.copy_(loaded_model[name])
 
     def forward(self, hidden_states, attention_mask=None, head_mask=None, encoder_hidden_states=None,
                 encoder_attention_mask=None):
@@ -128,6 +128,7 @@ class BertEncoder(nn.Module):
             # training with a switch agent
             action_probs = []
             actions = []
+            action_idxs = []
             internal_classifier_logits = []
 
             if self.training:  #
@@ -152,6 +153,7 @@ class BertEncoder(nn.Module):
             for i in range(self.num_parts):
                 action_prob = self.agent(hidden_states)
                 action_probs.append(action_prob)
+                action_idxs.append(left_idx)
                 # policy gradient
                 if self.training:
                     m = Categorical(action_prob)
@@ -160,17 +162,17 @@ class BertEncoder(nn.Module):
                     action = torch.argmax(action_prob, dim=-1)
                 actions.append(action)
 
-                exit_idx = left_idx[action == 2]  # using 2 for current code
+                exit_idx = left_idx[action == 0]  # using 0 for current code
                 if len(exit_idx) > 0:
                     exited_logit = self.early_classifiers[i](hidden_states)[action == 2]
                     exited_logit_pairs.append((exited_logit, exit_idx))
 
                 #  to implement acceleration, exited examples are not supposed to continue the forward loop
 
-                base_idx = left_idx[action == 0]
-                large_idx = left_idx[action == 1]
-                base_input = hidden_states[action == 0]
-                large_input = hidden_states[action == 1]
+                base_idx = left_idx[action == 1]
+                large_idx = left_idx[action == 2]
+                base_input = hidden_states[action == 1]
+                large_input = hidden_states[action == 2]
 
                 if len(base_input) > 0:
                     base_hiddens, base_outputs = _run_sub_blocks(base_input,
@@ -199,7 +201,7 @@ class BertEncoder(nn.Module):
 
             outputs = (hidden_states,)
             outputs = outputs + (action_probs, actions, left_idx, exited_logit_pairs,
-                                 internal_classifier_logits,)  # action_probs for computing loss
+                                 internal_classifier_logits, action_idxs,)  # action_probs for computing loss
             if self.output_hidden_states:
                 outputs = outputs + (all_hidden_states,)
             if self.output_attentions:
@@ -418,6 +420,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
         action_probs = None
         actions = None
         left_idx = None
+        action_idxs = None
         early_exit_pairs, internal_classifier_logits = [], []
         if self.bert.encoder.switch_mode:
             action_probs = outputs[2]
@@ -425,6 +428,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
             left_idx = outputs[4]
             early_exit_pairs = outputs[5]
             internal_classifier_logits = outputs[6]
+            action_idxs = outputs[7]
 
         pooled_output = self.dropout(pooled_output)
         logits = self.classifier(pooled_output)
@@ -463,15 +467,22 @@ class BertForSequenceClassification(BertPreTrainedModel):
                 final_decision_prob = torch.ones((bsz,), device=input_ids.device)
                 paths = []
                 path_penalty = torch.zeros((bsz,), device=input_ids.device)
-                for path_prob, action in zip(action_probs, actions):
+                for path_prob, action, action_idx in zip(action_probs, actions, action_idxs):
                     selected_path = action.unsqueeze(1)
                     prob = torch.gather(path_prob, dim=-1, index=selected_path).squeeze()
-                    final_decision_prob *= prob  # final prob
-                    path_penalty += (action + 1)  # add large block prob as penalty
-                    paths.append(selected_path)
+                    padded_prob = torch.ones((bsz,))
+                    padded_prob[action_idx] = prob
+                    final_decision_prob *= padded_prob  # final prob
+                    padded_path = torch.zeros((bsz,))
+                    padded_path[action_idx] = action
+                    path_penalty += padded_path  # add large block prob as penalty
+                    paths.append(padded_path.unsqueeze(1))
+
                 if not self.training:
                     paths = torch.cat(paths, dim=-1)  # bsz, num_parts
                     # we can add an expected saving computation here
+                    all_large = torch.ones_like(paths) * 2
+                    print("Expected saving: %.3f\%" % (torch.sum(paths) / torch.sum(all_large)).item() * 100)
                     print(paths[:4])  # sample for some path
                 if self.num_labels != 1:
                     entropy_reward_fct = CrossEntropyLoss(reduction='none')
