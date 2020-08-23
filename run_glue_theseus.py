@@ -239,9 +239,10 @@ def main():
         ])
     if model_args.switch_mode:
         optimizer_grouped_parameters.extend(
-            [{'params': [p for p in model.bert.encoder.base_early_exits.parameters()]},
-             {'params': [p for p in model.bert.encoder.large_early_exits.parameters()]},
+            [#{'params': [p for p in model.bert.encoder.base_early_exits.parameters()]},
+             #{'params': [p for p in model.bert.encoder.large_early_exits.parameters()]},
              {'params': [p for p in model.bert.encoder.agent.parameters()]},
+             {'params': [p for p in model.bert.encoder.early_classifiers.parameters()]}
              ]
         )
 

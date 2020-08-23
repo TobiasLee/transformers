@@ -122,7 +122,7 @@ class BertEncoder(nn.Module):
 
         elif self.switch_mode:
             bsz = hidden_states.size()[0]
-            left_idx = torch.arange(bsz)
+            left_idx = torch.arange(bsz, device=hidden_states.device)
             large_interval = self.prd_n_layer // self.num_parts
             base_interval = self.scc_n_layer // self.num_parts
             # training with a switch agent
@@ -205,8 +205,12 @@ class BertEncoder(nn.Module):
             # stack results for fp 16
             stacked_probs = torch.cat([p.unsqueeze(0) for p in action_probs], dim=0)  # num_parts, bsz, actio_space
             stacked_action = torch.cat([a.unsqueeze(0) for a in actions])  # num_parts, bsz,
-            early_exit_logit = torch.cat([p[0] for p in early_exit_pairs], dim=0)  # num_exited,  num_labels
-            early_exit_idx = torch.cat([p[1] for p in early_exit_pairs], dim=0)  # num_exited,
+            if len(early_exit_pairs) > 0 :
+                early_exit_logit = torch.cat([p[0] for p in early_exit_pairs], dim=0)  # num_exited,  num_labels
+                early_exit_idx = torch.cat([p[1] for p in early_exit_pairs], dim=0)  # num_exited,
+            else:
+                early_exit_logit = None
+                early_exit_idx = None 
             if len(internal_classifier_logits) > 0:
                 stacked_internal_classifier_logits = torch.cat([logit.unsqueeze(0) for logit in internal_classifier_logits],
                                                            dim=0)  # num_parts, bsz, num_labels
@@ -505,7 +509,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
                     paths = torch.cat(paths, dim=-1)  # bsz, num_parts
                     # we can add an expected saving computation here
                     all_large = torch.ones_like(paths) * 2
-                    print("Expected saving: %.3f\%" % (torch.sum(paths) / torch.sum(all_large)).item() * 100)
+                    print("Expected saving: %.3f%%" % ((torch.sum(paths) / torch.sum(all_large, dtype=torch.float)).item() * 100))
                     print(paths[:4])  # sample for some path
                 if self.num_labels != 1:
                     entropy_reward_fct = CrossEntropyLoss(reduction='none')
