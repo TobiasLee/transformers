@@ -160,7 +160,7 @@ class BertEncoder(nn.Module):
                     action = m.sample()
                 else:  # during evaluation, we do not sample but using the argmax for path selection
                     action = torch.argmax(action_prob, dim=-1)
-                padded_action = torch.zeros((bsz,), device=hidden_states.device)
+                padded_action = torch.zeros((bsz,), device=hidden_states.device, dtype=torch.long)
                 padded_action[left_idx] = action
                 actions.append(padded_action)
 
@@ -207,9 +207,11 @@ class BertEncoder(nn.Module):
             stacked_action = torch.cat([a.unsqueeze(0) for a in actions])  # num_parts, bsz,
             early_exit_logit = torch.cat([p[0] for p in early_exit_pairs], dim=0)  # num_exited,  num_labels
             early_exit_idx = torch.cat([p[1] for p in early_exit_pairs], dim=0)  # num_exited,
-
-            stacked_internal_classifier_logits = torch.cat([logit.unsqueeze(0) for logit in internal_classifier_logits],
+            if len(internal_classifier_logits) > 0:
+                stacked_internal_classifier_logits = torch.cat([logit.unsqueeze(0) for logit in internal_classifier_logits],
                                                            dim=0)  # num_parts, bsz, num_labels
+            else:
+                stacked_internal_classifier_logits = None
             outputs = outputs + (left_idx,
                                  stacked_probs,
                                  stacked_action,
@@ -471,12 +473,13 @@ class BertForSequenceClassification(BertPreTrainedModel):
                 internal_loss = None
                 weights = 0.0
                 # internal classifier loss
-                for i, logits in enumerate(internal_classifier_logits):
-                    if internal_loss is None:
-                        internal_loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
-                    else:
-                        internal_loss += (i + 1) * loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
-                    weights += i + 1
+                if self.training:
+                    for i, logits in enumerate(internal_classifier_logits):
+                        if internal_loss is None:
+                            internal_loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
+                        else:
+                            internal_loss += (i + 1) * loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
+                        weights += i + 1
                 internal_loss = internal_loss / weights if internal_loss is not None else 0.0
 
                 bsz = logits.size()[0]
