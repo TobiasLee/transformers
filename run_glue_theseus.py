@@ -22,7 +22,7 @@ import os
 import sys
 from dataclasses import dataclass, field
 from typing import Callable, Dict, Optional
-
+import time 
 import numpy as np
 import torch.nn as nn
 
@@ -91,6 +91,14 @@ class ModelArguments:
                                          "pooler"}
     )
 
+    fix_scc_layer: bool = field(
+        default=False, metadata={"help": "fix  scc layer"}
+    )
+
+    early_exit: bool = field(
+        default=False, metadata={"help": "add early exit branch"}
+    )
+
     switch_mode: bool = field(
         default=False, metadata={"help": "Auto switch mode"}
     )
@@ -98,6 +106,8 @@ class ModelArguments:
     path_penalty_ratio: Optional[float] = field(
         default=0.0, metadata={"help": "path penalty for selecting large block"}
     )
+
+
     #
     # parser.add_argument("--replacing_rate", type=float, required=True,
     #                     help="Constant replacing rate. Also base replacing rate if using a scheduler.")
@@ -186,6 +196,8 @@ def main():
         model.bert.encoder.num_parts = model_args.num_parts
     if model_args.switch_mode:
         model.set_switch_mode(True) # using switch mode
+    if model_args.early_exit:
+        model.bert.init_highway_pooler()
 
     # Replace rate scheduler
     if model_args.scheduler_type == 'none':
@@ -217,17 +229,20 @@ def main():
     #         p.requires_grad = False
     # Prepare optimizer and schedule (linear warmup and decay)
     no_decay = ['bias', 'LayerNorm.weight']
-    optimizer_grouped_parameters = [
-        {'params': [p for n, p in model.bert.encoder.scc_layer.named_parameters() if
-                    not any(nd in n for nd in no_decay)], 'weight_decay': training_args.weight_decay},
-        {'params': [p for n, p in model.bert.encoder.scc_layer.named_parameters() if
-                    any(nd in n for nd in no_decay)], 'weight_decay': 0.0},
-    ]
+    optimizer_grouped_parameters = []
+    if not model_args.fix_scc_layer:
+        optimizer_grouped_parameters.extend([
+            {'params': [p for n, p in model.bert.encoder.scc_layer.named_parameters() if
+                        not any(nd in n for nd in no_decay)], 'weight_decay': training_args.weight_decay},
+            {'params': [p for n, p in model.bert.encoder.scc_layer.named_parameters() if
+                        any(nd in n for nd in no_decay)], 'weight_decay': 0.0},
+        ])
     if model_args.switch_mode:
         optimizer_grouped_parameters.extend(
-            [{'params': [p for p in model.bert.encoder.base_early_exits.parameters()]},
-             {'params': [p for p in model.bert.encoder.large_early_exits.parameters()]},
+            [#{'params': [p for p in model.bert.encoder.base_early_exits.parameters()]},
+             #{'params': [p for p in model.bert.encoder.large_early_exits.parameters()]},
              {'params': [p for p in model.bert.encoder.agent.parameters()]},
+             {'params': [p for p in model.bert.encoder.early_classifiers.parameters()]}
              ]
         )
 
@@ -294,8 +309,10 @@ def main():
 
         for eval_dataset in eval_datasets:
             trainer.compute_metrics = build_compute_metrics_fn(eval_dataset.args.task_name)
+            t0 = time.time()
             eval_result = trainer.evaluate(eval_dataset=eval_dataset)
-
+            t1 = time.time()
+            logger.info("Time consumed: %.3f s" % (t1-t0))
             output_eval_file = os.path.join(
                 training_args.output_dir, f"eval_results_{eval_dataset.args.task_name}.txt"
             )
@@ -305,7 +322,7 @@ def main():
                     for key, value in eval_result.items():
                         logger.info("  %s = %s", key, value)
                         writer.write("%s = %s\n" % (key, value))
-
+                    writer.write("Time consumed: %.3f" % (t1-t0))
             eval_results.update(eval_result)
 
     if training_args.do_predict:
