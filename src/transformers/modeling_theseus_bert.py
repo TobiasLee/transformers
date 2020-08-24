@@ -122,7 +122,8 @@ class BertEncoder(nn.Module):
 
         elif self.switch_mode:
             bsz = hidden_states.size()[0]
-            left_idx = torch.arange(bsz, device=hidden_states.device)
+            device = hidden_states.device
+            left_idx = torch.arange(bsz, device=device)
             large_interval = self.prd_n_layer // self.num_parts
             base_interval = self.scc_n_layer // self.num_parts
             # training with a switch agent
@@ -151,7 +152,7 @@ class BertEncoder(nn.Module):
             early_exit_pairs = []
             for i in range(self.num_parts):
                 action_prob = self.agent(hidden_states)
-                padded_prob = torch.ones((bsz, self.agent.action_classifier.out_features), device=hidden_states.device)
+                padded_prob = torch.ones((bsz, self.agent.action_classifier.out_features), device=device)
                 padded_prob[left_idx] = action_prob
                 action_probs.append(padded_prob)
                 # policy gradient
@@ -160,7 +161,7 @@ class BertEncoder(nn.Module):
                     action = m.sample()
                 else:  # during evaluation, we do not sample but using the argmax for path selection
                     action = torch.argmax(action_prob, dim=-1)
-                padded_action = torch.zeros((bsz,), device=hidden_states.device, dtype=torch.long)
+                padded_action = torch.zeros((bsz,), device=device, dtype=torch.long)
                 padded_action[left_idx] = action
                 actions.append(padded_action)
 
