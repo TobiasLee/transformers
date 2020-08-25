@@ -206,17 +206,20 @@ class BertEncoder(nn.Module):
             # stack results for fp 16
             stacked_probs = torch.cat([p.unsqueeze(0) for p in action_probs], dim=0)  # num_parts, bsz, actio_space
             stacked_action = torch.cat([a.unsqueeze(0) for a in actions])  # num_parts, bsz,
-            if len(early_exit_pairs) > 0 :
+            if len(early_exit_pairs) > 0:
                 early_exit_logit = torch.cat([p[0] for p in early_exit_pairs], dim=0)  # num_exited,  num_labels
                 early_exit_idx = torch.cat([p[1] for p in early_exit_pairs], dim=0)  # num_exited,
             else:
                 early_exit_logit = None
-                early_exit_idx = None 
+                early_exit_idx = None
+
             if len(internal_classifier_logits) > 0:
-                stacked_internal_classifier_logits = torch.cat([logit.unsqueeze(0) for logit in internal_classifier_logits],
-                                                           dim=0)  # num_parts, bsz, num_labels
+                stacked_internal_classifier_logits = torch.cat(
+                    [logit.unsqueeze(0) for logit in internal_classifier_logits],
+                    dim=0)  # num_parts, bsz, num_labels
             else:
                 stacked_internal_classifier_logits = None
+
             outputs = outputs + (left_idx,
                                  stacked_probs,
                                  stacked_action,
@@ -510,8 +513,10 @@ class BertForSequenceClassification(BertPreTrainedModel):
                     paths = torch.cat(paths, dim=-1)  # bsz, num_parts
                     # we can add an expected saving computation here
                     all_large = torch.ones_like(paths) * 2
-                    print("Expected saving: %.3f%%" % ((torch.sum(paths) / torch.sum(all_large, dtype=torch.float)).item() * 100))
+                    print("Layer ratio: %.3f%%" % (
+                            (torch.sum(paths) / torch.sum(all_large, dtype=torch.float)).item() * 100))
                     print(paths[:4])  # sample for some path
+
                 if self.num_labels != 1:
                     entropy_reward_fct = CrossEntropyLoss(reduction='none')
                     reward = - entropy_reward_fct(logits.view(-1, self.num_labels), labels.view(-1))
@@ -520,8 +525,8 @@ class BertForSequenceClassification(BertPreTrainedModel):
                     reward = - mse_reward_fct(logits.view(-1), labels.view(-1))
 
                 reward -= self.path_penalty_ratio * path_penalty
-                reward = torch.sum(reward *
-                                   torch.log(final_decision_prob + 1e-9))  # sum over bsz
+                reward = torch.mean(reward *
+                                    torch.log(final_decision_prob + 1e-9))  # sum over bsz
                 loss = loss + internal_loss - reward  # minus reward + penalty
                 del paths
             outputs = (loss,) + outputs
