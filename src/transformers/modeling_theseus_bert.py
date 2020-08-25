@@ -161,8 +161,8 @@ class BertEncoder(nn.Module):
                     action = m.sample()
                 else:  # during evaluation, we do not sample but using the argmax for path selection
                     action = torch.argmax(action_prob, dim=-1)
-                padded_action = torch.zeros((bsz,), device=device, dtype=torch.long)
-                padded_action[left_idx] = action
+                padded_action = torch.zeros((bsz,), device=device)
+                padded_action[left_idx] = action.float()
                 actions.append(padded_action)
 
                 exit_idx = left_idx[action == 0]  # using 0 for current code
@@ -496,7 +496,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
                 path_penalty = torch.zeros((bsz,), device=input_ids.device)
                 for path_prob, action in zip(action_probs, actions):
                     selected_path = action.unsqueeze(1)  # bsz, 1
-                    prob = torch.gather(path_prob, dim=-1, index=selected_path).squeeze()  # bsz
+                    prob = torch.gather(path_prob, dim=-1, index=selected_path.long()).squeeze()  # bsz
                     final_decision_prob *= prob
                     path_penalty += action  #
                     paths.append(action.unsqueeze(1))
