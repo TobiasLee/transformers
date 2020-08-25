@@ -152,8 +152,6 @@ class BertEncoder(nn.Module):
 
             early_exit_pairs = []
             for i in range(self.num_parts):
-                if len(hidden_states) == 0 :
-                    break 
                 action_prob = self.agent(hidden_states)
                 padded_prob = torch.ones((bsz, self.agent.action_classifier.out_features), device=device)
                 padded_prob[left_idx] = action_prob
@@ -174,12 +172,12 @@ class BertEncoder(nn.Module):
                     early_exit_pairs.append((exited_logit, exit_idx))
 
                 #  to implement acceleration, exited examples are not supposed to continue the forward loop
-
+                if len(exit_idx) == len(hidden_states):  # all examples are exit
+                    break
                 base_idx = left_idx[action == 1]
                 large_idx = left_idx[action == 2]
                 base_input = hidden_states[action == 1]
                 large_input = hidden_states[action == 2]
-
                 if len(base_input) > 0:
                     base_hiddens, base_outputs = _run_sub_blocks(base_input,
                                                                  self.scc_layer[
@@ -187,8 +185,9 @@ class BertEncoder(nn.Module):
                                                                  base_idx)
                 if len(large_input) > 0:
                     large_hiddens, large_outputs = _run_sub_blocks(large_input, self.layer[
-                                                                                i * large_interval:i * large_interval + large_interval],
+                                                                   i * large_interval:i * large_interval + large_interval],
                                                                    large_idx)
+
                 if len(base_input) == 0:
                     hidden_states = large_hiddens
                 elif len(large_input) == 0:
