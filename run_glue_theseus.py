@@ -238,14 +238,24 @@ def main():
                         any(nd in n for nd in no_decay)], 'weight_decay': 0.0},
         ])
     if model_args.switch_mode:
-        optimizer_grouped_parameters.extend(
-            [#{'params': [p for p in model.bert.encoder.base_early_exits.parameters()]},
-             #{'params': [p for p in model.bert.encoder.large_early_exits.parameters()]},
-             {'params': [p for p in model.bert.encoder.agent.parameters()]},
-             {'params': [p for p in model.bert.encoder.early_classifiers.parameters()]}
-             ]
-        )
+        # we first train early exit, than train the agent ?
+        if model_args.first_stage:
+            optimizer_grouped_parameters.extend([
+                 # {'params': [p for p in model.bert.encoder.agent.parameters()]},
+                 {'params': [p for p in model.bert.encoder.early_classifiers.parameters()]}
+                 ]
+            )
 
+        elif model_args.second_stage:
+            optimizer_grouped_parameters.extend([
+                 {'params': [p for p in model.bert.encoder.agent.parameters()]},
+                 # {'params': [p for p in model.bert.encoder.early_classifiers.parameters()]}
+                 ])
+        else:
+            optimizer_grouped_parameters.extend([
+                {'params': [p for p in model.bert.encoder.agent.parameters()]},
+                {'params': [p for p in model.bert.encoder.early_classifiers.parameters()]}
+            ])
 
     # Get datasets
     train_dataset = (
