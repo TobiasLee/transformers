@@ -103,6 +103,12 @@ class ModelArguments:
         default=False, metadata={"help": "Auto switch mode"}
     )
 
+    first_stage: bool = field(
+        default=False, metadata={"help": "first stage for training the early exit classifiers"}
+    )
+    second_stage: bool = field(
+        default=False, metadata={"help": "second stage for training the switch agent "}
+    )
     path_penalty_ratio: Optional[float] = field(
         default=0.0, metadata={"help": "path penalty for selecting large block"}
     )
