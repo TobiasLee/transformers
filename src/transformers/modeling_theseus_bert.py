@@ -173,6 +173,7 @@ class BertEncoder(nn.Module):
 
                 #  to implement acceleration, exited examples are not supposed to continue the forward loop
                 if len(exit_idx) == len(hidden_states):  # all examples are exit
+                    hidden_states = hidden_states[action == 1]  # create an len zero tensor as return hidden states
                     break
                 base_idx = left_idx[action == 1]
                 large_idx = left_idx[action == 2]
