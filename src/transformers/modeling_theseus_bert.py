@@ -77,6 +77,7 @@ class BertEncoder(nn.Module):
         self.early_classifiers = nn.ModuleList([EarlyClassifier(config) for _ in range(self.scc_n_layer)])
         self.switch_mode = switch_mode
         self.agent = SwitchAgent(config, n_action_space=n_action_space)
+        self.config = config
 
     def set_replacing_rate(self, replacing_rate):
         if not 0 < replacing_rate <= 1:
@@ -212,15 +213,16 @@ class BertEncoder(nn.Module):
                 early_exit_logit = torch.cat([p[0] for p in early_exit_pairs], dim=0)  # num_exited,  num_labels
                 early_exit_idx = torch.cat([p[1] for p in early_exit_pairs], dim=0)  # num_exited,
             else:
-                early_exit_logit = None
-                early_exit_idx = None
+                early_exit_logit = torch.zeros((0, self.config.num_labels), device=device)
+                early_exit_idx = torch.zeros((0, ), dtype=torch.long)  # create zero tensor for multi-gpu
 
             if len(internal_classifier_logits) > 0:
                 stacked_internal_classifier_logits = torch.cat(
                     [logit.unsqueeze(0) for logit in internal_classifier_logits],
                     dim=0)  # num_parts, bsz, num_labels
             else:
-                stacked_internal_classifier_logits = None
+                stacked_internal_classifier_logits = torch.zeros((self.num_parts, bsz, self.config.num_labels),
+                                                                 device=device) # create zero tensor for multi-gpu
 
             outputs = outputs + (left_idx,
                                  stacked_probs,
