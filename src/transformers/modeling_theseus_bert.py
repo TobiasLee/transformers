@@ -214,7 +214,7 @@ class BertEncoder(nn.Module):
                 early_exit_idx = torch.cat([p[1] for p in early_exit_pairs], dim=0)  # num_exited,
             else:
                 early_exit_logit = torch.zeros((0, self.config.num_labels), device=device)
-                early_exit_idx = torch.zeros((0, ), dtype=torch.long)  # create zero tensor for multi-gpu
+                early_exit_idx = torch.zeros((0, ), dtype=torch.long, device=device)  # create zero tensor for multi-gpu
 
             if len(internal_classifier_logits) > 0:
                 stacked_internal_classifier_logits = torch.cat(
