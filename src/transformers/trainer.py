@@ -657,7 +657,7 @@ class Trainer:
         logger.info("Saving model checkpoint to %s", output_dir)
         # Save a trained model and configuration using `save_pretrained()`.
         # They can then be reloaded using `from_pretrained()`
-        #if not isinstance(self.model, PreTrainedModel):
+        # if not isinstance(self.model, PreTrainedModel):
         #   raise ValueError("Trainer.model appears to not be a PreTrainedModel")
         self.model.save_pretrained(output_dir)
 
@@ -847,8 +847,6 @@ class Trainer:
         if paths is not None:
             paths = paths.cpu().numpy()
 
-
-
         if self.compute_metrics is not None and preds is not None and label_ids is not None:
             metrics = self.compute_metrics(EvalPrediction(predictions=preds, label_ids=label_ids))
         else:
@@ -856,9 +854,10 @@ class Trainer:
         if len(eval_losses) > 0:
             metrics["eval_loss"] = np.mean(eval_losses)
         metrics["eval_time"] = end - start
+
         if paths is not None:
             print(paths[:20])
-            all_large = 2 * np.ones_like(paths) # all large
+            all_large = 2 * np.ones_like(paths)  # all large
             metrics["expected_saving"] = np.sum(all_large) / np.sum(paths)
         # Prefix all keys with eval_
         for key in list(metrics.keys()):
