@@ -325,10 +325,7 @@ def main():
 
         for eval_dataset in eval_datasets:
             trainer.compute_metrics = build_compute_metrics_fn(eval_dataset.args.task_name)
-            t0 = time.time()
             eval_result = trainer.evaluate(eval_dataset=eval_dataset)
-            t1 = time.time()
-            logger.info("Time consumed: %.3f s" % (t1-t0))
             output_eval_file = os.path.join(
                 training_args.output_dir, f"eval_results_{eval_dataset.args.task_name}.txt"
             )
@@ -338,7 +335,6 @@ def main():
                     for key, value in eval_result.items():
                         logger.info("  %s = %s", key, value)
                         writer.write("%s = %s\n" % (key, value))
-                    writer.write("Time consumed: %.3f" % (t1-t0))
             eval_results.update(eval_result)
 
     if training_args.do_predict:

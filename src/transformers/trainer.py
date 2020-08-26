@@ -8,6 +8,7 @@ import shutil
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
+import time
 
 import numpy as np
 import torch
@@ -779,6 +780,7 @@ class Trainer:
         if is_tpu_available():
             dataloader = pl.ParallelLoader(dataloader, [self.args.device]).per_device_loader(self.args.device)
 
+        start = time.time()
         for inputs in tqdm(dataloader, desc=description):
             has_labels = any(inputs.get(k) is not None for k in ["labels", "lm_labels", "masked_lm_labels"])
 
@@ -811,6 +813,7 @@ class Trainer:
                         label_ids = inputs["labels"].detach()
                     else:
                         label_ids = torch.cat((label_ids, inputs["labels"].detach()), dim=0)
+        end = time.time()
 
         if self.args.local_rank != -1:
             # In distributed mode, concatenate all results from all nodes:
@@ -837,7 +840,7 @@ class Trainer:
             metrics = {}
         if len(eval_losses) > 0:
             metrics["eval_loss"] = np.mean(eval_losses)
-
+        metrics["eval_time"] = start - end
         # Prefix all keys with eval_
         for key in list(metrics.keys()):
             if not key.startswith("eval_"):
