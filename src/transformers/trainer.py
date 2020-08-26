@@ -722,9 +722,9 @@ class Trainer:
             output = self._prediction_loop(eval_dataloader, description="Evaluation", head_mask=head_mask,
                                            require_paths=False)
         else:
-            output  = self._prediction_loop(eval_dataloader, description="Evaluation",
-                                                               head_mask=head_mask,
-                                                               require_paths=True)
+            output = self._prediction_loop(eval_dataloader, description="Evaluation",
+                                           head_mask=head_mask,
+                                           require_paths=True)
 
         self._log(output.metrics)
 
@@ -749,7 +749,7 @@ class Trainer:
 
     def _prediction_loop(
             self, dataloader: DataLoader, description: str, prediction_loss_only: Optional[bool] = None, head_mask=None,
-            require_head_masks=False, require_paths=False
+            require_head_masks=False, require_paths=False, num_parts=6
     ):
         """
         Prediction/evaluation loop, shared by `evaluate()` and `predict()`.
@@ -776,7 +776,7 @@ class Trainer:
         preds: torch.Tensor = None
         label_ids: torch.Tensor = None
         learned_head_masks: torch.Tensor = None
-        paths: torch.Tensor = None
+        paths: list = []
         model.eval()
 
         if is_tpu_available():
@@ -800,10 +800,7 @@ class Trainer:
 
                 if require_paths:
                     results_paths = outputs[-1]
-                    if paths is None:
-                        paths = results_paths.detach()
-                    else:
-                        paths = torch.cat((paths, results_paths.detach()), dim=0)
+                    paths.append(results_paths.detach())
                 # if require_head_masks:
                 #     head_masks = outputs[-1] # the last one， tuple: (Tensor(bsz,  num_attention_heads, seq_len, 1), )
                 #     head_masks = torch.stack(head_masks).squeeze() # (12, bsz, num_heads, seq_len, 1)
@@ -844,8 +841,12 @@ class Trainer:
         if label_ids is not None:
             label_ids = label_ids.cpu().numpy()
 
-        if paths is not None:
-            paths = paths.cpu().numpy()
+        expected_saving = 1.0
+        if len(paths) > 0:
+            total_sum = model
+            for batch_path in paths:
+                total_sum += np.sum(batch_path.cpu().numpy())
+            expected_saving = total_sum / len(label_ids) / num_parts
 
         if self.compute_metrics is not None and preds is not None and label_ids is not None:
             metrics = self.compute_metrics(EvalPrediction(predictions=preds, label_ids=label_ids))
@@ -854,6 +855,7 @@ class Trainer:
         if len(eval_losses) > 0:
             metrics["eval_loss"] = np.mean(eval_losses)
         metrics["eval_time"] = end - start
+        metrics["expected_saving"] = expected_saving
 
         if paths is not None:
             print(paths[:20])
