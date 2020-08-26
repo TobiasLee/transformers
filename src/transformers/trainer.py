@@ -722,7 +722,7 @@ class Trainer:
             output = self._prediction_loop(eval_dataloader, description="Evaluation", head_mask=head_mask,
                                            require_paths=False)
         else:
-            output, learned_head_masks = self._prediction_loop(eval_dataloader, description="Evaluation",
+            output  = self._prediction_loop(eval_dataloader, description="Evaluation",
                                                                head_mask=head_mask,
                                                                require_paths=True)
 
@@ -800,7 +800,7 @@ class Trainer:
 
                 if require_paths:
                     results_paths = outputs[-1]
-                    if paths is not None:
+                    if paths is None:
                         paths = results_paths.detach()
                     else:
                         paths = torch.cat((paths, results_paths.detach()), dim=0)
@@ -858,7 +858,7 @@ class Trainer:
         if paths is not None:
             print(paths[:20])
             all_large = 2 * np.ones_like(paths)  # all large
-            metrics["expected_saving"] = np.sum(all_large) / np.sum(paths)
+            metrics["expected_saving"] = np.sum(paths) / (np.sum(all_large) + 1e-6)
         # Prefix all keys with eval_
         for key in list(metrics.keys()):
             if not key.startswith("eval_"):
