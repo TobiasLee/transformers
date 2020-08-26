@@ -843,7 +843,7 @@ class Trainer:
 
         expected_saving = 1.0
         if len(paths) > 0:
-            total_sum = model
+            total_sum = 0.0
             for batch_path in paths:
                 total_sum += np.sum(batch_path.cpu().numpy())
             expected_saving = total_sum / len(label_ids) / num_parts

@@ -486,16 +486,14 @@ class BertForSequenceClassification(BertPreTrainedModel):
 
             if action_probs is not None:
                 internal_loss = None
-                weights = 0.0
                 # internal classifier loss
                 if self.training:
                     for i, logits in enumerate(internal_classifier_logits):
                         if internal_loss is None:
                             internal_loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
                         else:
-                            internal_loss += (i + 1) * loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
-                        weights += i + 1
-                internal_loss = internal_loss / weights if internal_loss is not None else 0.0
+                            internal_loss += loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
+                internal_loss = internal_loss if internal_loss is not None else 0.0
 
                 bsz = logits.size()[0]
                 final_decision_prob = torch.ones((bsz,), device=input_ids.device)
