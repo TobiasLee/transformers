@@ -700,7 +700,8 @@ class Trainer:
             self, eval_dataset: Optional[Dataset] = None,
             prediction_loss_only: Optional[bool] = None,
             head_mask=None,
-            require_head_masks=False
+            require_head_masks=False,
+            require_paths=False
     ):
         """
         Run evaluation and return metrics.
@@ -717,13 +718,13 @@ class Trainer:
                 - the potential metrics computed from the predictions
         """
         eval_dataloader = self.get_eval_dataloader(eval_dataset)
-        if not require_head_masks:
+        if not require_paths:
             output = self._prediction_loop(eval_dataloader, description="Evaluation", head_mask=head_mask,
-                                           require_head_masks=False)
+                                           require_paths=False)
         else:
             output, learned_head_masks = self._prediction_loop(eval_dataloader, description="Evaluation",
                                                                head_mask=head_mask,
-                                                               require_head_masks=True)
+                                                               require_paths=True)
 
         self._log(output.metrics)
 
@@ -748,7 +749,7 @@ class Trainer:
 
     def _prediction_loop(
             self, dataloader: DataLoader, description: str, prediction_loss_only: Optional[bool] = None, head_mask=None,
-            require_head_masks=False
+            require_head_masks=False, require_paths=False
     ):
         """
         Prediction/evaluation loop, shared by `evaluate()` and `predict()`.
@@ -775,6 +776,7 @@ class Trainer:
         preds: torch.Tensor = None
         label_ids: torch.Tensor = None
         learned_head_masks: torch.Tensor = None
+        paths: torch.Tensor = None
         model.eval()
 
         if is_tpu_available():
@@ -795,14 +797,22 @@ class Trainer:
                     eval_losses += [step_eval_loss.mean().item()]
                 else:
                     logits = outputs[0]
-                if require_head_masks:
-                    head_masks = outputs[-1] # the last one， tuple: (Tensor(bsz,  num_attention_heads, seq_len, 1), )
-                    head_masks = torch.stack(head_masks).squeeze() # (12, bsz, num_heads, seq_len, 1)
-                    head_masks = head_masks.transpose(1, 0) # bsz, num_layer, num_heads, seq_len
-                    if learned_head_masks is None:
-                        learned_head_masks = head_masks.detach()
+
+                if require_paths:
+                    results_paths = outputs[-1]
+                    if paths is not None:
+                        paths = results_paths.detach()
                     else:
-                        learned_head_masks = torch.cat((learned_head_masks, head_masks.detach()), dim=0)
+                        paths = torch.cat((paths, results_paths.detach()), dim=0)
+                # if require_head_masks:
+                #     head_masks = outputs[-1] # the last one， tuple: (Tensor(bsz,  num_attention_heads, seq_len, 1), )
+                #     head_masks = torch.stack(head_masks).squeeze() # (12, bsz, num_heads, seq_len, 1)
+                #     head_masks = head_masks.transpose(1, 0) # bsz, num_layer, num_heads, seq_len
+                #     if learned_head_masks is None:
+                #         learned_head_masks = head_masks.detach()
+                #     else:
+                #         learned_head_masks = torch.cat((learned_head_masks, head_masks.detach()), dim=0)
+
             if not prediction_loss_only:
                 if preds is None:
                     preds = logits.detach()
@@ -834,13 +844,22 @@ class Trainer:
         if label_ids is not None:
             label_ids = label_ids.cpu().numpy()
 
+        if paths is not None:
+            paths = paths.cpu().numpy()
+
+
+
         if self.compute_metrics is not None and preds is not None and label_ids is not None:
             metrics = self.compute_metrics(EvalPrediction(predictions=preds, label_ids=label_ids))
         else:
             metrics = {}
         if len(eval_losses) > 0:
             metrics["eval_loss"] = np.mean(eval_losses)
-        metrics["eval_time"] = start - end
+        metrics["eval_time"] = end - start
+        if paths is not None:
+            print(paths[:20])
+            all_large = 2 * np.ones_like(paths) # all large
+            metrics["expected_saving"] = np.sum(all_large) / np.sum(paths)
         # Prefix all keys with eval_
         for key in list(metrics.keys()):
             if not key.startswith("eval_"):

@@ -474,7 +474,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
             logits = torch.cat([early_exit_logit, logits], dim=0)[order]
 
         outputs = (logits,) + outputs[2:]  # add hidden states and attention if they are here
-
+        paths = []
         if labels is not None:
             if self.num_labels == 1:
                 #  We are doing regression
@@ -499,7 +499,6 @@ class BertForSequenceClassification(BertPreTrainedModel):
 
                 bsz = logits.size()[0]
                 final_decision_prob = torch.ones((bsz,), device=input_ids.device)
-                paths = []
                 path_penalty = torch.zeros((bsz,), device=input_ids.device)
                 for path_prob, action in zip(action_probs, actions):
                     selected_path = action.unsqueeze(1)  # bsz, 1
@@ -519,10 +518,9 @@ class BertForSequenceClassification(BertPreTrainedModel):
                 if not self.training:
                     paths = torch.cat(paths, dim=-1)  # bsz, num_parts
                     # we can add an expected saving computation here
-                    all_large = torch.ones_like(paths) * 2
-                    print("Layer ratio: %.3f%%" % (
-                            (torch.sum(paths) / torch.sum(all_large, dtype=torch.float)).item() * 100))
-                    print(paths[:4])  # sample for some path
+                    # print("Layer ratio: %.3f%%" % (
+                    #         (torch.sum(paths) / torch.sum(all_large, dtype=torch.float)).item() * 100))
+                    # print(paths[:4])  # sample for some path
 
                 if self.num_labels != 1:
                     entropy_reward_fct = CrossEntropyLoss(reduction='none')
@@ -539,8 +537,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
                 else:
                     loss = loss - reward
                 # minus reward + penalty
-                del paths
-            outputs = (loss,) + outputs
+            outputs = (loss,) + outputs + (paths, )
 
         return outputs  # (loss), logits, (hidden_states), (attentions)
 
