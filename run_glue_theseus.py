@@ -103,6 +103,12 @@ class ModelArguments:
         default=False, metadata={"help": "Auto switch mode"}
     )
 
+    first_stage: bool = field(
+        default=False, metadata={"help": "first stage for training the early exit classifiers"}
+    )
+    second_stage: bool = field(
+        default=False, metadata={"help": "second stage for training the switch agent "}
+    )
     path_penalty_ratio: Optional[float] = field(
         default=0.0, metadata={"help": "path penalty for selecting large block"}
     )
@@ -238,14 +244,24 @@ def main():
                         any(nd in n for nd in no_decay)], 'weight_decay': 0.0},
         ])
     if model_args.switch_mode:
-        optimizer_grouped_parameters.extend(
-            [#{'params': [p for p in model.bert.encoder.base_early_exits.parameters()]},
-             #{'params': [p for p in model.bert.encoder.large_early_exits.parameters()]},
-             {'params': [p for p in model.bert.encoder.agent.parameters()]},
-             {'params': [p for p in model.bert.encoder.early_classifiers.parameters()]}
-             ]
-        )
+        # we first train early exit, than train the agent ?
+        if model_args.first_stage:
+            optimizer_grouped_parameters.extend([
+                 # {'params': [p for p in model.bert.encoder.agent.parameters()]},
+                 {'params': [p for p in model.bert.encoder.early_classifiers.parameters()]}
+                 ]
+            )
 
+        elif model_args.second_stage:
+            optimizer_grouped_parameters.extend([
+                 {'params': [p for p in model.bert.encoder.agent.parameters()]},
+                 # {'params': [p for p in model.bert.encoder.early_classifiers.parameters()]}
+                 ])
+        else:
+            optimizer_grouped_parameters.extend([
+                {'params': [p for p in model.bert.encoder.agent.parameters()]},
+                {'params': [p for p in model.bert.encoder.early_classifiers.parameters()]}
+            ])
 
     # Get datasets
     train_dataset = (
@@ -309,10 +325,7 @@ def main():
 
         for eval_dataset in eval_datasets:
             trainer.compute_metrics = build_compute_metrics_fn(eval_dataset.args.task_name)
-            t0 = time.time()
-            eval_result = trainer.evaluate(eval_dataset=eval_dataset)
-            t1 = time.time()
-            logger.info("Time consumed: %.3f s" % (t1-t0))
+            eval_result = trainer.evaluate(eval_dataset=eval_dataset, require_paths=True)
             output_eval_file = os.path.join(
                 training_args.output_dir, f"eval_results_{eval_dataset.args.task_name}.txt"
             )
@@ -322,7 +335,6 @@ def main():
                     for key, value in eval_result.items():
                         logger.info("  %s = %s", key, value)
                         writer.write("%s = %s\n" % (key, value))
-                    writer.write("Time consumed: %.3f" % (t1-t0))
             eval_results.update(eval_result)
 
     if training_args.do_predict:

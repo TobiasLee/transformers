@@ -77,6 +77,7 @@ class BertEncoder(nn.Module):
         self.early_classifiers = nn.ModuleList([EarlyClassifier(config) for _ in range(self.scc_n_layer)])
         self.switch_mode = switch_mode
         self.agent = SwitchAgent(config, n_action_space=n_action_space)
+        self.config = config
 
     def set_replacing_rate(self, replacing_rate):
         if not 0 < replacing_rate <= 1:
@@ -122,7 +123,8 @@ class BertEncoder(nn.Module):
 
         elif self.switch_mode:
             bsz = hidden_states.size()[0]
-            left_idx = torch.arange(bsz, device=hidden_states.device)
+            device = hidden_states.device
+            left_idx = torch.arange(bsz, device=device)
             large_interval = self.prd_n_layer // self.num_parts
             base_interval = self.scc_n_layer // self.num_parts
             # training with a switch agent
@@ -150,8 +152,10 @@ class BertEncoder(nn.Module):
 
             early_exit_pairs = []
             for i in range(self.num_parts):
+                if len(hidden_states) == 0:
+                    break
                 action_prob = self.agent(hidden_states)
-                padded_prob = torch.ones((bsz, self.agent.action_classifier.out_features), device=hidden_states.device)
+                padded_prob = torch.ones((bsz, self.agent.action_classifier.out_features), device=device)
                 padded_prob[left_idx] = action_prob
                 action_probs.append(padded_prob)
                 # policy gradient
@@ -160,7 +164,7 @@ class BertEncoder(nn.Module):
                     action = m.sample()
                 else:  # during evaluation, we do not sample but using the argmax for path selection
                     action = torch.argmax(action_prob, dim=-1)
-                padded_action = torch.zeros((bsz,), device=hidden_states.device, dtype=torch.long)
+                padded_action = torch.zeros(size=(bsz,), device=device, dtype=torch.long)
                 padded_action[left_idx] = action
                 actions.append(padded_action)
 
@@ -170,11 +174,13 @@ class BertEncoder(nn.Module):
                     early_exit_pairs.append((exited_logit, exit_idx))
 
                 #  to implement acceleration, exited examples are not supposed to continue the forward loop
-
                 base_idx = left_idx[action == 1]
                 large_idx = left_idx[action == 2]
                 base_input = hidden_states[action == 1]
                 large_input = hidden_states[action == 2]
+
+                base_hiddens = base_input
+                large_hiddens = large_input
 
                 if len(base_input) > 0:
                     base_hiddens, base_outputs = _run_sub_blocks(base_input,
@@ -183,8 +189,9 @@ class BertEncoder(nn.Module):
                                                                  base_idx)
                 if len(large_input) > 0:
                     large_hiddens, large_outputs = _run_sub_blocks(large_input, self.layer[
-                                                                                i * large_interval:i * large_interval + large_interval],
+                                                                   i * large_interval:i * large_interval + large_interval],
                                                                    large_idx)
+
                 if len(base_input) == 0:
                     hidden_states = large_hiddens
                 elif len(large_input) == 0:
@@ -205,17 +212,21 @@ class BertEncoder(nn.Module):
             # stack results for fp 16
             stacked_probs = torch.cat([p.unsqueeze(0) for p in action_probs], dim=0)  # num_parts, bsz, actio_space
             stacked_action = torch.cat([a.unsqueeze(0) for a in actions])  # num_parts, bsz,
-            if len(early_exit_pairs) > 0 :
+            if len(early_exit_pairs) > 0:
                 early_exit_logit = torch.cat([p[0] for p in early_exit_pairs], dim=0)  # num_exited,  num_labels
                 early_exit_idx = torch.cat([p[1] for p in early_exit_pairs], dim=0)  # num_exited,
             else:
-                early_exit_logit = None
-                early_exit_idx = None 
+                early_exit_logit = torch.zeros((0, self.config.num_labels), device=device)
+                early_exit_idx = torch.zeros((0, ), dtype=torch.long, device=device)  # create zero tensor for multi-gpu
+
             if len(internal_classifier_logits) > 0:
-                stacked_internal_classifier_logits = torch.cat([logit.unsqueeze(0) for logit in internal_classifier_logits],
-                                                           dim=0)  # num_parts, bsz, num_labels
+                stacked_internal_classifier_logits = torch.cat(
+                    [logit.unsqueeze(0) for logit in internal_classifier_logits],
+                    dim=0)  # num_parts, bsz, num_labels
             else:
-                stacked_internal_classifier_logits = None
+                stacked_internal_classifier_logits = torch.zeros((self.num_parts, bsz, self.config.num_labels),
+                                                                 device=device) # create zero tensor for multi-gpu
+
             outputs = outputs + (left_idx,
                                  stacked_probs,
                                  stacked_action,
@@ -463,7 +474,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
             logits = torch.cat([early_exit_logit, logits], dim=0)[order]
 
         outputs = (logits,) + outputs[2:]  # add hidden states and attention if they are here
-
+        paths = []
         if labels is not None:
             if self.num_labels == 1:
                 #  We are doing regression
@@ -475,20 +486,17 @@ class BertForSequenceClassification(BertPreTrainedModel):
 
             if action_probs is not None:
                 internal_loss = None
-                weights = 0.0
                 # internal classifier loss
                 if self.training:
                     for i, logits in enumerate(internal_classifier_logits):
                         if internal_loss is None:
                             internal_loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
                         else:
-                            internal_loss += (i + 1) * loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
-                        weights += i + 1
-                internal_loss = internal_loss / weights if internal_loss is not None else 0.0
+                            internal_loss += loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
+                internal_loss = internal_loss if internal_loss is not None else 0.0
 
                 bsz = logits.size()[0]
                 final_decision_prob = torch.ones((bsz,), device=input_ids.device)
-                paths = []
                 path_penalty = torch.zeros((bsz,), device=input_ids.device)
                 for path_prob, action in zip(action_probs, actions):
                     selected_path = action.unsqueeze(1)  # bsz, 1
@@ -508,9 +516,10 @@ class BertForSequenceClassification(BertPreTrainedModel):
                 if not self.training:
                     paths = torch.cat(paths, dim=-1)  # bsz, num_parts
                     # we can add an expected saving computation here
-                    all_large = torch.ones_like(paths) * 2
-                    print("Expected saving: %.3f%%" % ((torch.sum(paths) / torch.sum(all_large, dtype=torch.float)).item() * 100))
-                    print(paths[:4])  # sample for some path
+                    # print("Layer ratio: %.3f%%" % (
+                    #         (torch.sum(paths) / torch.sum(all_large, dtype=torch.float)).item() * 100))
+                    # print(paths[:4])  # sample for some path
+
                 if self.num_labels != 1:
                     entropy_reward_fct = CrossEntropyLoss(reduction='none')
                     reward = - entropy_reward_fct(logits.view(-1, self.num_labels), labels.view(-1))
@@ -519,11 +528,14 @@ class BertForSequenceClassification(BertPreTrainedModel):
                     reward = - mse_reward_fct(logits.view(-1), labels.view(-1))
 
                 reward -= self.path_penalty_ratio * path_penalty
-                reward = torch.sum(reward *
-                                   torch.log(final_decision_prob + 1e-9))  # sum over bsz
-                loss = loss + internal_loss - reward  # minus reward + penalty
-                del paths
-            outputs = (loss,) + outputs
+                reward = torch.mean(reward *
+                                    torch.log(final_decision_prob + 1e-9))  # sum over bsz
+                if self.training:
+                    loss = loss + internal_loss - reward
+                else:
+                    loss = loss - reward
+                # minus reward + penalty
+            outputs = (loss,) + outputs + (paths, )
 
         return outputs  # (loss), logits, (hidden_states), (attentions)
 

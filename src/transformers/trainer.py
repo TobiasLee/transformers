@@ -8,6 +8,7 @@ import shutil
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
+import time
 
 import numpy as np
 import torch
@@ -656,7 +657,7 @@ class Trainer:
         logger.info("Saving model checkpoint to %s", output_dir)
         # Save a trained model and configuration using `save_pretrained()`.
         # They can then be reloaded using `from_pretrained()`
-        #if not isinstance(self.model, PreTrainedModel):
+        # if not isinstance(self.model, PreTrainedModel):
         #   raise ValueError("Trainer.model appears to not be a PreTrainedModel")
         self.model.save_pretrained(output_dir)
 
@@ -699,7 +700,8 @@ class Trainer:
             self, eval_dataset: Optional[Dataset] = None,
             prediction_loss_only: Optional[bool] = None,
             head_mask=None,
-            require_head_masks=False
+            require_head_masks=False,
+            require_paths=False
     ):
         """
         Run evaluation and return metrics.
@@ -716,13 +718,13 @@ class Trainer:
                 - the potential metrics computed from the predictions
         """
         eval_dataloader = self.get_eval_dataloader(eval_dataset)
-        if not require_head_masks:
+        if not require_paths:
             output = self._prediction_loop(eval_dataloader, description="Evaluation", head_mask=head_mask,
-                                           require_head_masks=False)
+                                           require_paths=False)
         else:
-            output, learned_head_masks = self._prediction_loop(eval_dataloader, description="Evaluation",
-                                                               head_mask=head_mask,
-                                                               require_head_masks=True)
+            output = self._prediction_loop(eval_dataloader, description="Evaluation",
+                                           head_mask=head_mask,
+                                           require_paths=True)
 
         self._log(output.metrics)
 
@@ -747,7 +749,7 @@ class Trainer:
 
     def _prediction_loop(
             self, dataloader: DataLoader, description: str, prediction_loss_only: Optional[bool] = None, head_mask=None,
-            require_head_masks=False
+            require_head_masks=False, require_paths=False, num_parts=6
     ):
         """
         Prediction/evaluation loop, shared by `evaluate()` and `predict()`.
@@ -774,11 +776,13 @@ class Trainer:
         preds: torch.Tensor = None
         label_ids: torch.Tensor = None
         learned_head_masks: torch.Tensor = None
+        paths: list = []
         model.eval()
 
         if is_tpu_available():
             dataloader = pl.ParallelLoader(dataloader, [self.args.device]).per_device_loader(self.args.device)
 
+        start = time.time()
         for inputs in tqdm(dataloader, desc=description):
             has_labels = any(inputs.get(k) is not None for k in ["labels", "lm_labels", "masked_lm_labels"])
 
@@ -793,14 +797,19 @@ class Trainer:
                     eval_losses += [step_eval_loss.mean().item()]
                 else:
                     logits = outputs[0]
-                if require_head_masks:
-                    head_masks = outputs[-1] # the last one， tuple: (Tensor(bsz,  num_attention_heads, seq_len, 1), )
-                    head_masks = torch.stack(head_masks).squeeze() # (12, bsz, num_heads, seq_len, 1)
-                    head_masks = head_masks.transpose(1, 0) # bsz, num_layer, num_heads, seq_len
-                    if learned_head_masks is None:
-                        learned_head_masks = head_masks.detach()
-                    else:
-                        learned_head_masks = torch.cat((learned_head_masks, head_masks.detach()), dim=0)
+
+                if require_paths:
+                    results_paths = outputs[-1]
+                    paths.append(results_paths.detach())
+                # if require_head_masks:
+                #     head_masks = outputs[-1] # the last one， tuple: (Tensor(bsz,  num_attention_heads, seq_len, 1), )
+                #     head_masks = torch.stack(head_masks).squeeze() # (12, bsz, num_heads, seq_len, 1)
+                #     head_masks = head_masks.transpose(1, 0) # bsz, num_layer, num_heads, seq_len
+                #     if learned_head_masks is None:
+                #         learned_head_masks = head_masks.detach()
+                #     else:
+                #         learned_head_masks = torch.cat((learned_head_masks, head_masks.detach()), dim=0)
+
             if not prediction_loss_only:
                 if preds is None:
                     preds = logits.detach()
@@ -811,6 +820,7 @@ class Trainer:
                         label_ids = inputs["labels"].detach()
                     else:
                         label_ids = torch.cat((label_ids, inputs["labels"].detach()), dim=0)
+        end = time.time()
 
         if self.args.local_rank != -1:
             # In distributed mode, concatenate all results from all nodes:
@@ -831,13 +841,26 @@ class Trainer:
         if label_ids is not None:
             label_ids = label_ids.cpu().numpy()
 
+        expected_saving = 1.0
+        if len(paths) > 0:
+            total_sum = 0.0
+            for batch_path in paths:
+                total_sum += np.sum(batch_path.cpu().numpy())
+            expected_saving = total_sum / len(label_ids) / num_parts
+
         if self.compute_metrics is not None and preds is not None and label_ids is not None:
             metrics = self.compute_metrics(EvalPrediction(predictions=preds, label_ids=label_ids))
         else:
             metrics = {}
         if len(eval_losses) > 0:
             metrics["eval_loss"] = np.mean(eval_losses)
+        metrics["eval_time"] = end - start
+        metrics["expected_saving"] = expected_saving
 
+        if paths is not None:
+            print(paths[:20])
+            all_large = 2 * np.ones_like(paths)  # all large
+            metrics["expected_saving"] = np.sum(paths) / (np.sum(all_large) + 1e-6)
         # Prefix all keys with eval_
         for key in list(metrics.keys()):
             if not key.startswith("eval_"):
