@@ -857,10 +857,7 @@ class Trainer:
         metrics["eval_time"] = end - start
         metrics["expected_saving"] = expected_saving
 
-        if paths is not None:
-            print(paths[:20])
-            all_large = 2 * np.ones_like(paths)  # all large
-            metrics["expected_saving"] = np.sum(paths) / (np.sum(all_large) + 1e-6)
+
         # Prefix all keys with eval_
         for key in list(metrics.keys()):
             if not key.startswith("eval_"):
