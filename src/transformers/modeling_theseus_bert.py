@@ -117,7 +117,7 @@ class BertEncoder(nn.Module):
                 layer_hidden_states = layer_output[0]
             return layer_hidden_states, layer_output
 
-        if self.training and not self.train_agent and not self.train_early_exit: # normal theseus training 
+        if self.training and not self.train_agent and not self.train_early_exit:  # normal theseus training
             inference_layers = []
             for i in range(self.scc_n_layer):
                 if self.bernoulli.sample() == 1:  # REPLACE
@@ -138,7 +138,7 @@ class BertEncoder(nn.Module):
             all_early_logits = ()
             for i in range(self.num_parts):  # indeed, it is a six switch model
                 internal_logit = self.early_classifiers[i](internal_hidden)
-                all_early_logits = all_early_logits + (internal_logit, )
+                all_early_logits = all_early_logits + (internal_logit,)
                 if pattern % 2 == 1:
                     internal_hidden, _ = _run_sub_blocks(internal_hidden,
                                                          self.layer[
@@ -146,10 +146,10 @@ class BertEncoder(nn.Module):
                                                          left_idx)
 
                 else:
-                    internal_base_hidden, _ = _run_sub_blocks(internal_hidden,
-                                                              self.scc_layer[
-                                                              i * base_interval:i * base_interval + base_interval],
-                                                              left_idx)
+                    internal_hidden, _ = _run_sub_blocks(internal_hidden,
+                                                         self.scc_layer[
+                                                         i * base_interval:i * base_interval + base_interval],
+                                                         left_idx)
 
                 pattern //= 2
             outputs = (internal_hidden,)
@@ -462,7 +462,6 @@ class BertForSequenceClassification(BertPreTrainedModel):
 
     def set_switch_pattern(self, switch_pattern):
         self.bert.encoder.switch_pattern = switch_pattern
-
 
     def set_path_penalty(self, penalty_ratio):
         self.path_penalty_ratio = penalty_ratio
