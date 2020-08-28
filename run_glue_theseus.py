@@ -251,14 +251,14 @@ def main():
         ])
     if model_args.switch_mode:
         # we first train early exit, than train the agent ?
-        if model_args.first_stage:
+        if model_args.train_early_exit:
             optimizer_grouped_parameters.extend([
                  # {'params': [p for p in model.bert.encoder.agent.parameters()]},
                  {'params': [p for p in model.bert.encoder.early_classifiers.parameters()]}
                  ]
             )
 
-        elif model_args.second_stage:
+        elif model_args.train_agent:
             optimizer_grouped_parameters.extend([
                  {'params': [p for p in model.bert.encoder.agent.parameters()]},
                  # {'params': [p for p in model.bert.encoder.early_classifiers.parameters()]}
