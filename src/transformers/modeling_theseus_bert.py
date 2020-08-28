@@ -62,7 +62,7 @@ class SwitchAgent(nn.Module):
 
 class BertEncoder(nn.Module):
     def __init__(self, config, scc_n_layer=6, switch_pattern=0, num_parts=6,
-                 switch_mode=False, n_action_space=3,
+                 train_agent=False, n_action_space=3,
                  train_early_exit=False):
         super(BertEncoder, self).__init__()
         self.prd_n_layer = config.num_hidden_layers
@@ -79,7 +79,7 @@ class BertEncoder(nn.Module):
         # self.base_early_exits = nn.ModuleList([EarlyClassifier(config) for _ in range(scc_n_layer)])
         # self.large_early_exits = nn.ModuleList([EarlyClassifier(config) for _ in range(config.num_hidden_layers)])
         self.early_classifiers = nn.ModuleList([EarlyClassifier(config) for _ in range(self.scc_n_layer)])
-        self.switch_mode = switch_mode
+        self.train_agent = train_agent
         self.agent = SwitchAgent(config, n_action_space=n_action_space)
         self.config = config
         self.train_early_exit = train_early_exit
@@ -117,7 +117,7 @@ class BertEncoder(nn.Module):
                 layer_hidden_states = layer_output[0]
             return layer_hidden_states, layer_output
 
-        if self.training and not self.switch_mode:
+        if self.training and not self.train_agent and not self.train_early_exit: # normal theseus training 
             inference_layers = []
             for i in range(self.scc_n_layer):
                 if self.bernoulli.sample() == 1:  # REPLACE
@@ -136,10 +136,9 @@ class BertEncoder(nn.Module):
             pattern = random.choice([i for i in range(0, 2 ** self.num_parts)])
             internal_hidden = hidden_states
             all_early_logits = ()
-
             for i in range(self.num_parts):  # indeed, it is a six switch model
                 internal_logit = self.early_classifiers[i](internal_hidden)
-                all_early_logits = all_early_logits + (internal_logit,)
+                all_early_logits = all_early_logits + (internal_logit, )
                 if pattern % 2 == 1:
                     internal_hidden, _ = _run_sub_blocks(internal_hidden,
                                                          self.layer[
@@ -157,7 +156,7 @@ class BertEncoder(nn.Module):
             outputs = outputs + (all_early_logits,)
             return outputs
 
-        elif self.switch_mode:
+        elif self.train_agent:
             bsz = hidden_states.size()[0]
             device = hidden_states.device
             left_idx = torch.arange(bsz, device=device)
@@ -464,8 +463,6 @@ class BertForSequenceClassification(BertPreTrainedModel):
     def set_switch_pattern(self, switch_pattern):
         self.bert.encoder.switch_pattern = switch_pattern
 
-    def set_switch_mode(self, switch_mode):
-        self.bert.encoder.switch_mode = switch_mode
 
     def set_path_penalty(self, penalty_ratio):
         self.path_penalty_ratio = penalty_ratio
@@ -487,7 +484,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
         early_exit_idx = None
         early_exit_logit = None
         internal_classifier_logits = None
-        if self.bert.encoder.switch_mode:
+        if self.bert.encoder.train_agent:
             left_idx = outputs[2]
             action_probs = outputs[3]
             actions = outputs[4]
