@@ -222,7 +222,7 @@ def main():
         model.bert.encoder.scc_layer = nn.ModuleList([deepcopy(model.bert.encoder.layer[ix]) for ix in range(scc_n_layer)])
 
     if model_args.path_penalty_ratio > 0:
-        logger.info("setting path penalty to: %.2f" % model_args.path_penalty_ratio)
+        logger.info("setting path penalty to: %.6f" % model_args.path_penalty_ratio)
         model.set_path_penalty(model_args.path_penalty_ratio)
     # if model_args.freeze_teacher:
     #     for p in model.bert.encoder.layer.parameters():
