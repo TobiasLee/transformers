@@ -13,6 +13,8 @@ from transformers.modeling_utils import PreTrainedModel
 from transformers.configuration_bert import BertConfig
 from transformers.modeling_bert import load_tf_weights_in_bert, BertLayerNorm, BertEmbeddings, BertLayer, BertPooler
 
+import random
+
 logger = logging.getLogger(__name__)
 
 
@@ -59,7 +61,9 @@ class SwitchAgent(nn.Module):
 
 
 class BertEncoder(nn.Module):
-    def __init__(self, config, scc_n_layer=6, switch_pattern=0, num_parts=6, switch_mode=False, n_action_space=3):
+    def __init__(self, config, scc_n_layer=6, switch_pattern=0, num_parts=6,
+                 switch_mode=False, n_action_space=3,
+                 train_early_exit=False):
         super(BertEncoder, self).__init__()
         self.prd_n_layer = config.num_hidden_layers
         self.scc_n_layer = scc_n_layer
@@ -78,6 +82,7 @@ class BertEncoder(nn.Module):
         self.switch_mode = switch_mode
         self.agent = SwitchAgent(config, n_action_space=n_action_space)
         self.config = config
+        self.train_early_exit = train_early_exit
 
     def set_replacing_rate(self, replacing_rate):
         if not 0 < replacing_rate <= 1:
@@ -121,7 +126,37 @@ class BertEncoder(nn.Module):
                     for offset in range(self.compress_ratio):
                         inference_layers.append(self.layer[i * self.compress_ratio + offset])
 
-        elif self.switch_mode:
+        elif self.train_early_exit:
+            # internal_base_hidden, internal_large_hidden = hidden_states, hidden_states
+            bsz = hidden_states.size()[0]
+            device = hidden_states.device
+            left_idx = torch.arange(bsz, device=device)
+            large_interval = self.prd_n_layer // self.num_parts  #
+            base_interval = self.scc_n_layer // self.num_parts
+            pattern = random.choice([i for i in range(0, 2 ** self.num_parts)])
+            internal_hidden = hidden_states
+            all_early_logits = ()
+
+            for i in range(self.num_parts):  # indeed, it is a six switch model
+                if pattern % 2 == 1:
+                    internal_hidden, _ = _run_sub_blocks(internal_hidden,
+                                                         self.layer[
+                                                         i * large_interval:i * large_interval + large_interval],
+                                                         left_idx)
+
+                else:
+                    internal_base_hidden, _ = _run_sub_blocks(internal_hidden,
+                                                              self.scc_layer[
+                                                              i * base_interval:i * base_interval + base_interval],
+                                                              left_idx)
+                internal_logit = self.early_classifiers[i](internal_hidden)
+                all_early_logits = all_early_logits + (internal_logit,)
+                pattern //= 2
+            outputs = (internal_hidden,)
+            outputs = outputs + (all_early_logits,)
+            return outputs
+
+        elif self.switch_mode and self.second_stage:
             bsz = hidden_states.size()[0]
             device = hidden_states.device
             left_idx = torch.arange(bsz, device=device)
@@ -132,23 +167,19 @@ class BertEncoder(nn.Module):
             actions = []
             internal_classifier_logits = []
 
-            if self.training:  #
-                internal_base_hidden, internal_large_hidden = hidden_states, hidden_states
-
-                for i in range(self.num_parts):
-                    # internal  logit for training early exits
-                    internal_base_logit = self.early_classifiers[i](internal_base_hidden)
-                    internal_large_logit = self.early_classifiers[i](internal_large_hidden)
-                    internal_classifier_logits.append(internal_base_logit)
-                    internal_classifier_logits.append(internal_large_logit)
-                    internal_base_hidden, _ = _run_sub_blocks(internal_base_hidden,
-                                                              self.scc_layer[
-                                                              i * base_interval:i * base_interval + base_interval],
-                                                              left_idx)
-                    internal_large_hidden, _ = _run_sub_blocks(internal_large_hidden,
-                                                               self.layer[
-                                                               i * large_interval:i * large_interval + large_interval],
-                                                               left_idx)
+            # internal  logit for training early exits
+            # internal_base_logit = self.early_classifiers[i](internal_base_hidden)
+            # internal_large_logit = self.early_classifiers[i](internal_large_hidden)
+            # internal_classifier_logits.append(internal_base_logit)
+            # internal_classifier_logits.append(internal_large_logit)
+            # internal_base_hidden, _ = _run_sub_blocks(internal_base_hidden,
+            #                                           self.scc_layer[
+            #                                           i * base_interval:i * base_interval + base_interval],
+            #                                           left_idx)
+            # internal_large_hidden, _ = _run_sub_blocks(internal_large_hidden,
+            #                                            self.layer[
+            #                                            i * large_interval:i * large_interval + large_interval],
+            #                                            left_idx)
 
             early_exit_pairs = []
             for i in range(self.num_parts):
@@ -189,7 +220,7 @@ class BertEncoder(nn.Module):
                                                                  base_idx)
                 if len(large_input) > 0:
                     large_hiddens, large_outputs = _run_sub_blocks(large_input, self.layer[
-                                                                   i * large_interval:i * large_interval + large_interval],
+                                                                                i * large_interval:i * large_interval + large_interval],
                                                                    large_idx)
 
                 if len(base_input) == 0:
@@ -217,7 +248,7 @@ class BertEncoder(nn.Module):
                 early_exit_idx = torch.cat([p[1] for p in early_exit_pairs], dim=0)  # num_exited,
             else:
                 early_exit_logit = torch.zeros((0, self.config.num_labels), device=device)
-                early_exit_idx = torch.zeros((0, ), dtype=torch.long, device=device)  # create zero tensor for multi-gpu
+                early_exit_idx = torch.zeros((0,), dtype=torch.long, device=device)  # create zero tensor for multi-gpu
 
             if len(internal_classifier_logits) > 0:
                 stacked_internal_classifier_logits = torch.cat(
@@ -225,7 +256,7 @@ class BertEncoder(nn.Module):
                     dim=0)  # num_parts, bsz, num_labels
             else:
                 stacked_internal_classifier_logits = torch.zeros((self.num_parts, bsz, self.config.num_labels),
-                                                                 device=device) # create zero tensor for multi-gpu
+                                                                 device=device)  # create zero tensor for multi-gpu
 
             outputs = outputs + (left_idx,
                                  stacked_probs,
@@ -462,6 +493,8 @@ class BertForSequenceClassification(BertPreTrainedModel):
             early_exit_logit = outputs[5]
             early_exit_idx = outputs[6]
             internal_classifier_logits = outputs[7]
+        elif self.bert.encoder.train_early_exit:
+            internal_classifier_logits = outputs[-1]
 
         pooled_output = self.dropout(pooled_output)
         logits = self.classifier(pooled_output)
@@ -484,17 +517,18 @@ class BertForSequenceClassification(BertPreTrainedModel):
                 loss_fct = CrossEntropyLoss()
                 loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
 
-            if action_probs is not None:
-                internal_loss = None
-                # internal classifier loss
-                if self.training:
-                    for i, logits in enumerate(internal_classifier_logits):
-                        if internal_loss is None:
-                            internal_loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
-                        else:
-                            internal_loss += loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
-                internal_loss = internal_loss if internal_loss is not None else 0.0
+            # internal classifier loss
+            if self.bert.encoder.train_early_exit:
+                for logits in internal_classifier_logits:  #
+                    if self.num_labels == 1:
+                        #  We are doing regression
+                        loss_fct = MSELoss()
+                        loss += loss_fct(logits.view(-1), labels.view(-1))
+                    else:
+                        loss_fct = CrossEntropyLoss()
+                        loss += loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
 
+            if action_probs is not None:
                 bsz = logits.size()[0]
                 final_decision_prob = torch.ones((bsz,), device=input_ids.device)
                 path_penalty = torch.zeros((bsz,), device=input_ids.device)
@@ -530,12 +564,13 @@ class BertForSequenceClassification(BertPreTrainedModel):
                 reward -= self.path_penalty_ratio * path_penalty
                 reward = torch.mean(reward *
                                     torch.log(final_decision_prob + 1e-9))  # sum over bsz
-                if self.training:
-                    loss = loss + internal_loss - reward
-                else:
-                    loss = loss - reward
+                # if self.training:
+                #     loss = loss + internal_loss - reward
+                # else:
+                # decouple early exit training & agent training
+                loss = loss - reward
                 # minus reward + penalty
-            outputs = (loss,) + outputs + (paths, )
+            outputs = (loss,) + outputs + (paths,)
 
         return outputs  # (loss), logits, (hidden_states), (attentions)
 
