@@ -103,10 +103,10 @@ class ModelArguments:
         default=False, metadata={"help": "Auto switch mode"}
     )
 
-    first_stage: bool = field(
+    train_early_exit: bool = field(
         default=False, metadata={"help": "first stage for training the early exit classifiers"}
     )
-    second_stage: bool = field(
+    train_agent: bool = field(
         default=False, metadata={"help": "second stage for training the switch agent "}
     )
     path_penalty_ratio: Optional[float] = field(
@@ -200,10 +200,16 @@ def main():
     if model_args.num_parts != 6:
         logger.info("Setting num parts as: %d" % model_args.num_parts)
         model.bert.encoder.num_parts = model_args.num_parts
-    if model_args.switch_mode:
-        model.set_switch_mode(True) # using switch mode
-    if model_args.early_exit:
+
+    assert model_args.train_early_exit ^ model_args.train_agent, "Two stage can only train agent or early exit"
+
+    if model_args.train_early_exit:
+        # if second stage, the early exit is already trained
+        model.bert.encoder.train_early_exit = True
         model.bert.init_highway_pooler()
+
+    if model_args.train_agent:
+        model.set_switch_mode(True)  # using switch mode
 
     # Replace rate scheduler
     if model_args.scheduler_type == 'none':
