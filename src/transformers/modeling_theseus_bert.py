@@ -138,6 +138,8 @@ class BertEncoder(nn.Module):
             all_early_logits = ()
 
             for i in range(self.num_parts):  # indeed, it is a six switch model
+                internal_logit = self.early_classifiers[i](internal_hidden)
+                all_early_logits = all_early_logits + (internal_logit,)
                 if pattern % 2 == 1:
                     internal_hidden, _ = _run_sub_blocks(internal_hidden,
                                                          self.layer[
@@ -149,14 +151,13 @@ class BertEncoder(nn.Module):
                                                               self.scc_layer[
                                                               i * base_interval:i * base_interval + base_interval],
                                                               left_idx)
-                internal_logit = self.early_classifiers[i](internal_hidden)
-                all_early_logits = all_early_logits + (internal_logit,)
+
                 pattern //= 2
             outputs = (internal_hidden,)
             outputs = outputs + (all_early_logits,)
             return outputs
 
-        elif self.switch_mode and self.second_stage:
+        elif self.switch_mode:
             bsz = hidden_states.size()[0]
             device = hidden_states.device
             left_idx = torch.arange(bsz, device=device)
