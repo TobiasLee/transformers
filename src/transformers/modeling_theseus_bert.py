@@ -63,7 +63,8 @@ class SwitchAgent(nn.Module):
 class BertEncoder(nn.Module):
     def __init__(self, config, scc_n_layer=6, switch_pattern=0, num_parts=6,
                  train_agent=False, n_action_space=3,
-                 train_early_exit=False):
+                 train_early_exit=False,
+                 early_exit_idx=-1):
         super(BertEncoder, self).__init__()
         self.prd_n_layer = config.num_hidden_layers
         self.scc_n_layer = scc_n_layer
@@ -83,6 +84,7 @@ class BertEncoder(nn.Module):
         self.agent = SwitchAgent(config, n_action_space=n_action_space)
         self.config = config
         self.train_early_exit = train_early_exit
+        self.early_exit_idx = early_exit_idx 
 
     def set_replacing_rate(self, replacing_rate):
         if not 0 < replacing_rate <= 1:
@@ -133,7 +135,7 @@ class BertEncoder(nn.Module):
             left_idx = torch.arange(bsz, device=device)
             large_interval = self.prd_n_layer // self.num_parts  #
             base_interval = self.scc_n_layer // self.num_parts
-            pattern = random.choice([i for i in range(0, 2 ** self.num_parts)])
+            pattern =  random.choice([i for i in range(0, 2 ** self.num_parts)])
             internal_hidden = hidden_states
             all_early_logits = ()
             for i in range(self.num_parts):  # indeed, it is a six switch model
@@ -272,6 +274,7 @@ class BertEncoder(nn.Module):
             return outputs  # last-layer hidden state, action_probs, (all hidden states), (all attentions)
 
         else:  # inference with compressed model
+            print('else branch')
             if self.switch_pattern == 0:  # default setting
                 inference_layers = self.scc_layer
             elif self.switch_pattern > 0:
@@ -502,6 +505,12 @@ class BertForSequenceClassification(BertPreTrainedModel):
             total_idx = torch.cat([early_exit_idx, left_idx], dim=0)
             _, order = torch.sort(total_idx)
             logits = torch.cat([early_exit_logit, logits], dim=0)[order]
+        
+        if self.bert.encoder.early_exit_idx != -1 and self.bert.encoder.train_early_exit: # test for specific early exit
+            print('using internal logit: %d ' % self.bert.encoder.early_exit_idx)
+            logits = internal_classifier_logits[self.bert.encoder.early_exit_idx]
+        elif self.bert.encoder.early_exit_idx == -1 and self.bert.encoder.train_early_exit:
+            logits = random.choice(internal_classifier_logits) # random choose a logit  
 
         outputs = (logits,) + outputs[2:]  # add hidden states and attention if they are here
         paths = []
@@ -515,15 +524,15 @@ class BertForSequenceClassification(BertPreTrainedModel):
                 loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
 
             # internal classifier loss
-            if self.bert.encoder.train_early_exit:
-                for logits in internal_classifier_logits:  #
+            if self.bert.encoder.train_early_exit and not self.training:
+                for early_logits in internal_classifier_logits:  #
                     if self.num_labels == 1:
                         #  We are doing regression
                         loss_fct = MSELoss()
-                        loss += loss_fct(logits.view(-1), labels.view(-1))
+                        loss += loss_fct(early_logits.view(-1), labels.view(-1))
                     else:
                         loss_fct = CrossEntropyLoss()
-                        loss += loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
+                        loss += loss_fct(early_logits.view(-1, self.num_labels), labels.view(-1))
 
             if action_probs is not None:
                 bsz = logits.size()[0]
