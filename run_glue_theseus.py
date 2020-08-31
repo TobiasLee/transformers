@@ -22,7 +22,7 @@ import os
 import sys
 from dataclasses import dataclass, field
 from typing import Callable, Dict, Optional
-import time 
+import time
 import numpy as np
 import torch.nn as nn
 
@@ -106,6 +106,11 @@ class ModelArguments:
     train_early_exit: bool = field(
         default=False, metadata={"help": "first stage for training the early exit classifiers"}
     )
+
+    init_highway: bool = field(
+        default=False, metadata={"help": "open when first stage for training the early exit classifiers"}
+    )
+
     train_agent: bool = field(
         default=False, metadata={"help": "second stage for training the switch agent "}
     )
@@ -208,7 +213,8 @@ def main():
     if model_args.train_early_exit:
         # if second stage, the early exit is already trained
         model.bert.encoder.train_early_exit = True
-        # model.bert.init_highway_pooler()
+        if model_args.init_highway:
+            model.bert.init_highway_pooler()
 
     if model_args.train_agent:
         model.set_switch_mode(True)  # using switch mode
@@ -216,7 +222,6 @@ def main():
     if model_args.early_exit_idx != -1:
         logger.info("Setting early exit at block %d" % model_args.early_exit_idx)
         model.bert.encoder.early_exit_idx = model_args.early_exit_idx
-
 
     # Replace rate scheduler
     if model_args.scheduler_type == 'none':
@@ -232,7 +237,8 @@ def main():
 
     scc_n_layer = model.bert.encoder.scc_n_layer
     if training_args.do_train and not model_args.switch_mode:
-        model.bert.encoder.scc_layer = nn.ModuleList([deepcopy(model.bert.encoder.layer[ix]) for ix in range(scc_n_layer)])
+        model.bert.encoder.scc_layer = nn.ModuleList(
+            [deepcopy(model.bert.encoder.layer[ix]) for ix in range(scc_n_layer)])
 
     if model_args.path_penalty_ratio > 0:
         logger.info("setting path penalty to: %.6f" % model_args.path_penalty_ratio)
@@ -260,19 +266,19 @@ def main():
         # we first train early exit, than train the agent ?
         if model_args.train_early_exit:
             optimizer_grouped_parameters.extend([
-                 # {'params': [p for p in model.bert.encoder.agent.parameters()]},
-                 {
-                 'params': [p for p in model.bert.encoder.early_classifiers.parameters()],
-                 "weight_decay": training_args.weight_decay
-                 }
-                 ]
+                # {'params': [p for p in model.bert.encoder.agent.parameters()]},
+                {
+                    'params': [p for p in model.bert.encoder.early_classifiers.parameters()],
+                    "weight_decay": training_args.weight_decay
+                }
+            ]
             )
 
         elif model_args.train_agent:
             optimizer_grouped_parameters.extend([
-                 {'params': [p for p in model.bert.encoder.agent.parameters()]},
-                 # {'params': [p for p in model.bert.encoder.early_classifiers.parameters()]}
-                 ])
+                {'params': [p for p in model.bert.encoder.agent.parameters()]},
+                # {'params': [p for p in model.bert.encoder.early_classifiers.parameters()]}
+            ])
         else:
             optimizer_grouped_parameters.extend([
                 {'params': [p for p in model.bert.encoder.agent.parameters()]},
