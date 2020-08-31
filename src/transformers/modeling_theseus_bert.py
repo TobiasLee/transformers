@@ -508,6 +508,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
         
         if self.bert.encoder.early_exit_idx != -1 and self.bert.encoder.train_early_exit: # test for specific early exit
             print('using internal logit: %d ' % self.bert.encoder.early_exit_idx)
+            print(len(internal_classifier_logits))
             logits = internal_classifier_logits[self.bert.encoder.early_exit_idx]
         elif self.bert.encoder.early_exit_idx == -1 and self.bert.encoder.train_early_exit:
             logits = random.choice(internal_classifier_logits) # random choose a logit  
@@ -524,15 +525,18 @@ class BertForSequenceClassification(BertPreTrainedModel):
                 loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
 
             # internal classifier loss
-            if self.bert.encoder.train_early_exit and not self.training:
+            if self.bert.encoder.train_early_exit:
+                early_losses = []
                 for early_logits in internal_classifier_logits:  #
                     if self.num_labels == 1:
                         #  We are doing regression
                         loss_fct = MSELoss()
-                        loss += loss_fct(early_logits.view(-1), labels.view(-1))
+                        early_loss = loss_fct(early_logits.view(-1), labels.view(-1))
                     else:
                         loss_fct = CrossEntropyLoss()
-                        loss += loss_fct(early_logits.view(-1, self.num_labels), labels.view(-1))
+                        early_loss= loss_fct(early_logits.view(-1, self.num_labels), labels.view(-1))
+                    early_losses.append(early_loss)
+                loss = sum(early_losses)
 
             if action_probs is not None:
                 bsz = logits.size()[0]

@@ -113,7 +113,9 @@ class ModelArguments:
         default=0.0, metadata={"help": "path penalty for selecting large block"}
     )
 
-
+    early_exit_idx: Optional[int] = field(
+        default=-1, metadata={"help": "path penalty for selecting large block"}
+    )
     #
     # parser.add_argument("--replacing_rate", type=float, required=True,
     #                     help="Constant replacing rate. Also base replacing rate if using a scheduler.")
@@ -206,10 +208,15 @@ def main():
     if model_args.train_early_exit:
         # if second stage, the early exit is already trained
         model.bert.encoder.train_early_exit = True
-        model.bert.init_highway_pooler()
+        # model.bert.init_highway_pooler()
 
     if model_args.train_agent:
         model.set_switch_mode(True)  # using switch mode
+
+    if model_args.early_exit_idx != -1:
+        logger.info("Setting early exit at block %d" % model_args.early_exit_idx)
+        model.bert.encoder.early_exit_idx = model_args.early_exit_idx
+
 
     # Replace rate scheduler
     if model_args.scheduler_type == 'none':
@@ -254,7 +261,10 @@ def main():
         if model_args.train_early_exit:
             optimizer_grouped_parameters.extend([
                  # {'params': [p for p in model.bert.encoder.agent.parameters()]},
-                 {'params': [p for p in model.bert.encoder.early_classifiers.parameters()]}
+                 {
+                 'params': [p for p in model.bert.encoder.early_classifiers.parameters()],
+                 "weight_decay": training_args.weight_decay
+                 }
                  ]
             )
 
@@ -331,7 +341,7 @@ def main():
 
         for eval_dataset in eval_datasets:
             trainer.compute_metrics = build_compute_metrics_fn(eval_dataset.args.task_name)
-            eval_result = trainer.evaluate(eval_dataset=eval_dataset, require_paths=True)
+            eval_result = trainer.evaluate(eval_dataset=eval_dataset, require_paths=False)
             output_eval_file = os.path.join(
                 training_args.output_dir, f"eval_results_{eval_dataset.args.task_name}.txt"
             )
