@@ -135,7 +135,7 @@ class BertEncoder(nn.Module):
             left_idx = torch.arange(bsz, device=device)
             large_interval = self.prd_n_layer // self.num_parts  #
             base_interval = self.scc_n_layer // self.num_parts
-            pattern =  random.choice([i for i in range(0, 2 ** self.num_parts)])
+            pattern =  63 #random.choice([i for i in range(0, 2 ** self.num_parts)])
             internal_hidden = hidden_states
             all_early_logits = ()
             for i in range(self.num_parts):  # indeed, it is a six switch model
