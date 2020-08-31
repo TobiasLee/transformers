@@ -64,7 +64,8 @@ class BertEncoder(nn.Module):
     def __init__(self, config, scc_n_layer=6, switch_pattern=0, num_parts=6,
                  train_agent=False, n_action_space=3,
                  train_early_exit=False,
-                 early_exit_idx=-1):
+                 early_exit_idx=-1,
+                 only_large_and_exit=False):
         super(BertEncoder, self).__init__()
         self.prd_n_layer = config.num_hidden_layers
         self.scc_n_layer = scc_n_layer
@@ -84,7 +85,9 @@ class BertEncoder(nn.Module):
         self.agent = SwitchAgent(config, n_action_space=n_action_space)
         self.config = config
         self.train_early_exit = train_early_exit
-        self.early_exit_idx = early_exit_idx 
+        self.early_exit_idx = early_exit_idx
+        self.only_large_and_exit = only_large_and_exit
+
 
     def set_replacing_rate(self, replacing_rate):
         if not 0 < replacing_rate <= 1:
@@ -158,7 +161,10 @@ class BertEncoder(nn.Module):
             outputs = outputs + (all_early_logits,)
             return outputs
 
-        elif self.train_agent:
+        elif self.train_agent and not self.only_large:
+            assert self.agent.action_classifier.out_features == 3, \
+                "action space number is supposed to be 3: base, large and exit, current is %d" % self.agent.action_classifier.out_features
+
             bsz = hidden_states.size()[0]
             device = hidden_states.device
             left_idx = torch.arange(bsz, device=device)
@@ -168,20 +174,6 @@ class BertEncoder(nn.Module):
             action_probs = []
             actions = []
             internal_classifier_logits = []
-
-            # internal  logit for training early exits
-            # internal_base_logit = self.early_classifiers[i](internal_base_hidden)
-            # internal_large_logit = self.early_classifiers[i](internal_large_hidden)
-            # internal_classifier_logits.append(internal_base_logit)
-            # internal_classifier_logits.append(internal_large_logit)
-            # internal_base_hidden, _ = _run_sub_blocks(internal_base_hidden,
-            #                                           self.scc_layer[
-            #                                           i * base_interval:i * base_interval + base_interval],
-            #                                           left_idx)
-            # internal_large_hidden, _ = _run_sub_blocks(internal_large_hidden,
-            #                                            self.layer[
-            #                                            i * large_interval:i * large_interval + large_interval],
-            #                                            left_idx)
 
             early_exit_pairs = []
             for i in range(self.num_parts):
@@ -273,8 +265,78 @@ class BertEncoder(nn.Module):
                 outputs = outputs + (all_attentions,)
             return outputs  # last-layer hidden state, action_probs, (all hidden states), (all attentions)
 
+        elif self.train_agent and self.only_large:  # only large and exit
+            assert self.agent.action_classifier.out_features == 2, "only large and exit, aciton is 2"
+            bsz = hidden_states.size()[0]
+            device = hidden_states.device
+            left_idx = torch.arange(bsz, device=device)
+            large_interval = self.prd_n_layer // self.num_parts
+            # training with a switch agent
+            action_probs = []
+            actions = []
+
+            early_exit_pairs = []
+            for i in range(self.num_parts):
+                action_prob = self.agent(hidden_states)
+                padded_prob = torch.ones((bsz, self.agent.action_classifier.out_features), device=device)
+                padded_prob[left_idx] = action_prob
+                action_probs.append(padded_prob)
+                # policy gradient
+                if self.training:
+                    m = Categorical(action_prob)
+                    action = m.sample()
+                else:  # during evaluation, we do not sample but using the argmax for path selection
+                    action = torch.argmax(action_prob, dim=-1)
+                padded_action = torch.zeros(size=(bsz,), device=device, dtype=torch.long)
+                padded_action[left_idx] = action
+                actions.append(padded_action)
+
+                exit_idx = left_idx[action == 0]  # using 0 for current code
+                if len(exit_idx) > 0:
+                    exited_logit = self.early_classifiers[i](hidden_states)[action == 0]
+                    early_exit_pairs.append((exited_logit, exit_idx))
+
+                left_idx = left_idx[action == 1]  # large action idx = 1
+                # to implement acceleration, exited examples are not supposed to continue the forward loop
+                hidden_states = hidden_states[action == 1]
+
+                if len(left_idx) > 0:
+                    hidden_states, blocks_outputs = _run_sub_blocks(hidden_states,
+                                                                    self.layer[
+                                                                    i * large_interval:i * large_interval + large_interval],
+                                                                    left_idx)
+
+                    if self.output_hidden_states:
+                        all_hidden_states = all_hidden_states + (hidden_states,)  # emit for the first hidden states?
+                else:
+                    break  # no examples left
+                # if self.output_attentions:
+                #     all_attentions = all_attentions + (blocks_outputs,)
+
+            outputs = (hidden_states,)
+            # stack results for fp 16
+            stacked_probs = torch.cat([p.unsqueeze(0) for p in action_probs], dim=0)  # num_parts, bsz, actio_space
+            stacked_action = torch.cat([a.unsqueeze(0) for a in actions])  # num_parts, bsz,
+            if len(early_exit_pairs) > 0:
+                early_exit_logit = torch.cat([p[0] for p in early_exit_pairs], dim=0)  # num_exited,  num_labels
+                early_exit_idx = torch.cat([p[1] for p in early_exit_pairs], dim=0)  # num_exited,
+            else:
+                early_exit_logit = torch.zeros((0, self.config.num_labels), device=device)
+                early_exit_idx = torch.zeros((0,), dtype=torch.long, device=device)  # create zero tensor for multi-gpu
+
+            outputs = outputs + (left_idx,
+                                 stacked_probs,
+                                 stacked_action,
+                                 early_exit_logit,
+                                 early_exit_idx
+                                 )  # action_probs for computing loss
+            if self.output_hidden_states:
+                outputs = outputs + (all_hidden_states,)
+            if self.output_attentions:
+                outputs = outputs + (all_attentions,)
+            return outputs  # last-layer hidden state, action_probs, (all hidden states), (all attentions)
         else:  # inference with compressed model
-            print('else branch')
+            print('else branch, usually used for normal theseus-bert inference')
             if self.switch_pattern == 0:  # default setting
                 inference_layers = self.scc_layer
             elif self.switch_pattern > 0:
@@ -492,7 +554,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
             actions = outputs[4]
             early_exit_logit = outputs[5]
             early_exit_idx = outputs[6]
-            internal_classifier_logits = outputs[7]
+            # internal_classifier_logits = outputs[7] # we separate internal classifier trianing
         elif self.bert.encoder.train_early_exit:
             internal_classifier_logits = outputs[-1]
 
@@ -505,8 +567,8 @@ class BertForSequenceClassification(BertPreTrainedModel):
             total_idx = torch.cat([early_exit_idx, left_idx], dim=0)
             _, order = torch.sort(total_idx)
             logits = torch.cat([early_exit_logit, logits], dim=0)[order]
-        
-        if self.bert.encoder.early_exit_idx != -1 and self.bert.encoder.train_early_exit: # test for specific early exit
+
+        if self.bert.encoder.early_exit_idx != -1 and self.bert.encoder.train_early_exit:  # test for specific early exit
             logits = internal_classifier_logits[self.bert.encoder.early_exit_idx]
         elif self.bert.encoder.early_exit_idx == -1 and self.bert.encoder.train_early_exit:
             logits = random.choice(internal_classifier_logits)  # random choose a logit
@@ -532,7 +594,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
                         early_loss = loss_fct(early_logits.view(-1), labels.view(-1))
                     else:
                         loss_fct = CrossEntropyLoss()
-                        early_loss= loss_fct(early_logits.view(-1, self.num_labels), labels.view(-1))
+                        early_loss = loss_fct(early_logits.view(-1, self.num_labels), labels.view(-1))
                     early_losses.append(early_loss)
                 loss = sum(early_losses)
 
