@@ -114,6 +114,11 @@ class ModelArguments:
     train_agent: bool = field(
         default=False, metadata={"help": "second stage for training the switch agent "}
     )
+
+    only_large_and_exit: bool = field(
+        default=False, metadata={"help": "Only large and exit action for switch agent"}
+    )
+
     path_penalty_ratio: Optional[float] = field(
         default=0.0, metadata={"help": "path penalty for selecting large block"}
     )
@@ -218,6 +223,8 @@ def main():
 
     if model_args.train_agent:
         model.set_switch_mode(True)  # using switch mode
+        if model_args.only_large_and_exit:
+            model.bert.encoder.only_large_and_exit = True
 
     if model_args.early_exit_idx != -1:
         logger.info("Setting early exit at block %d" % model_args.early_exit_idx)
@@ -276,7 +283,9 @@ def main():
 
         elif model_args.train_agent:
             optimizer_grouped_parameters.extend([
-                {'params': [p for p in model.bert.encoder.agent.parameters()]},
+                {'params': [p for p in model.bert.encoder.agent.parameters()],
+                 "weight_decay": training_args.weight_decay
+                 },
                 # {'params': [p for p in model.bert.encoder.early_classifiers.parameters()]}
             ])
         else:
