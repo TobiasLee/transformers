@@ -618,8 +618,8 @@ class BertForSequenceClassification(BertPreTrainedModel):
                     # path_penalty += padded_path  # add large block prob as penalty
                     # paths.append(padded_path.unsqueeze(1))
 
-                if not self.training:
-                    paths = torch.cat(paths, dim=-1)  # bsz, num_parts
+                # if not self.training:
+                #     paths = torch.cat(paths, dim=-1)  # bsz, num_parts
                     # we can add an expected saving computation here
                     # print("Layer ratio: %.3f%%" % (
                     #         (torch.sum(paths) / torch.sum(all_large, dtype=torch.float)).item() * 100))
@@ -627,21 +627,23 @@ class BertForSequenceClassification(BertPreTrainedModel):
 
                 if self.num_labels != 1:
                     entropy_reward_fct = CrossEntropyLoss(reduction='none')
-                    reward = - entropy_reward_fct(logits.view(-1, self.num_labels), labels.view(-1))
+                    performance_reward = - entropy_reward_fct(logits.view(-1, self.num_labels), labels.view(-1))
                 else:
                     mse_reward_fct = MSELoss(reduction='none')
-                    reward = - mse_reward_fct(logits.view(-1), labels.view(-1))
+                    performance_reward = - mse_reward_fct(logits.view(-1), labels.view(-1))
 
-                reward -= self.path_penalty_ratio * path_penalty
+                penalty_reward = - self.path_penalty_ratio * path_penalty
+                reward = performance_reward + penalty_reward
                 reward = torch.mean(reward *
                                     torch.log(final_decision_prob + 1e-9))  # sum over bsz
                 # if self.training:
                 #     loss = loss + internal_loss - reward
                 # else:
                 # decouple early exit training & agent training
-                loss = loss - reward
+                loss = - reward
+                outputs = outputs + (torch.mean(penalty_reward), torch.mean(performance_reward), paths, )
                 # minus reward + penalty
-            outputs = (loss,) + outputs + (paths,)
+            outputs = (loss,) + outputs
 
         return outputs  # (loss), logits, (hidden_states), (attentions)
 
