@@ -848,8 +848,8 @@ class Trainer:
             print(paths[:200])
             total_sum = 0.0
             for batch_path in paths:
-                total_sum += np.sum(batch_path.cpu().numpy())
-            expected_saving = total_sum / len(label_ids) / num_parts
+                total_sum += np.sum(batch_path.cpu().numpy()) * 2
+            expected_saving = 1 - total_sum / len(label_ids) / 12
 
         if self.compute_metrics is not None and preds is not None and label_ids is not None:
             metrics = self.compute_metrics(EvalPrediction(predictions=preds, label_ids=label_ids))
@@ -859,7 +859,6 @@ class Trainer:
             metrics["eval_loss"] = np.mean(eval_losses)
         metrics["eval_time"] = end - start
         metrics["expected_saving"] = expected_saving
-
 
         # Prefix all keys with eval_
         for key in list(metrics.keys()):
