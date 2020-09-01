@@ -720,13 +720,9 @@ class Trainer:
                 - the potential metrics computed from the predictions
         """
         eval_dataloader = self.get_eval_dataloader(eval_dataset)
-        if not require_paths:
-            output = self._prediction_loop(eval_dataloader, description="Evaluation", head_mask=head_mask,
-                                           require_paths=False)
-        else:
-            output = self._prediction_loop(eval_dataloader, description="Evaluation",
-                                           head_mask=head_mask,
-                                           require_paths=True)
+        output = self._prediction_loop(eval_dataloader, description="Evaluation",
+                                       head_mask=head_mask,
+                                       require_paths=require_paths)
 
         self._log(output.metrics)
 
@@ -775,6 +771,8 @@ class Trainer:
         logger.info("  Num examples = %d", self.num_examples(dataloader))
         logger.info("  Batch size = %d", batch_size)
         eval_losses: List[float] = []
+        eval_classification_reward: List[float] = []
+        eval_path_reward: List[float] = []
         preds: torch.Tensor = None
         label_ids: torch.Tensor = None
         learned_head_masks: torch.Tensor = None
@@ -803,6 +801,10 @@ class Trainer:
                 if require_paths:
                     results_paths = outputs[-1]
                     paths.append(results_paths.detach())
+                    performance_reward = outputs[-2]
+                    path_reward = outputs[-3]
+                    eval_classification_reward += [performance_reward.mean().item()]
+                    eval_path_reward += [path_reward.mean().item()]
                 # if require_head_masks:
                 #     head_masks = outputs[-1] # the last one， tuple: (Tensor(bsz,  num_attention_heads, seq_len, 1), )
                 #     head_masks = torch.stack(head_masks).squeeze() # (12, bsz, num_heads, seq_len, 1)
@@ -859,6 +861,10 @@ class Trainer:
             metrics["eval_loss"] = np.mean(eval_losses)
         metrics["eval_time"] = end - start
         metrics["expected_saving"] = expected_saving
+        if len(eval_classification_reward) > 0:
+            metrics["eval_classification_reward"] = np.mean(eval_classification_reward)
+        if len(eval_path_reward) > 0:
+            metrics["eval_path_reward"] = np.mean(eval_path_reward)
 
         # Prefix all keys with eval_
         for key in list(metrics.keys()):
