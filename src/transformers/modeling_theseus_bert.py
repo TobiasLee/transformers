@@ -618,8 +618,8 @@ class BertForSequenceClassification(BertPreTrainedModel):
                     # path_penalty += padded_path  # add large block prob as penalty
                     # paths.append(padded_path.unsqueeze(1))
 
-                # if not self.training:
-                #     paths = torch.cat(paths, dim=-1)  # bsz, num_parts
+                if not self.training:
+                    paths = torch.cat(paths, dim=-1)  # bsz, num_parts
                     # we can add an expected saving computation here
                     # print("Layer ratio: %.3f%%" % (
                     #         (torch.sum(paths) / torch.sum(all_large, dtype=torch.float)).item() * 100))
