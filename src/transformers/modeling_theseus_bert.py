@@ -82,7 +82,8 @@ class BertEncoder(nn.Module):
         # self.large_early_exits = nn.ModuleList([EarlyClassifier(config) for _ in range(config.num_hidden_layers)])
         self.early_classifiers = nn.ModuleList([EarlyClassifier(config) for _ in range(self.scc_n_layer)])
         self.train_agent = train_agent
-        self.agent = SwitchAgent(config, n_action_space=n_action_space)
+        self.agent = SwitchAgent(config, n_action_space=n_action_space) # n_action_space)
+        self.simple_agent = SwitchAgent(config, n_action_space=2) 
         self.config = config
         self.train_early_exit = train_early_exit
         self.early_exit_idx = early_exit_idx
@@ -161,7 +162,7 @@ class BertEncoder(nn.Module):
             outputs = outputs + (all_early_logits,)
             return outputs
 
-        elif self.train_agent and not self.only_large:
+        elif self.train_agent and not self.only_large_and_exit:
             assert self.agent.action_classifier.out_features == 3, \
                 "action space number is supposed to be 3: base, large and exit, current is %d" % self.agent.action_classifier.out_features
 
@@ -265,8 +266,8 @@ class BertEncoder(nn.Module):
                 outputs = outputs + (all_attentions,)
             return outputs  # last-layer hidden state, action_probs, (all hidden states), (all attentions)
 
-        elif self.train_agent and self.only_large:  # only large and exit
-            assert self.agent.action_classifier.out_features == 2, "only large and exit, aciton is 2"
+        elif self.train_agent and self.only_large_and_exit:  # only large and exit
+            assert self.simple_agent.action_classifier.out_features == 2, "only large and exit, aciton is 2"
             bsz = hidden_states.size()[0]
             device = hidden_states.device
             left_idx = torch.arange(bsz, device=device)
@@ -277,8 +278,8 @@ class BertEncoder(nn.Module):
 
             early_exit_pairs = []
             for i in range(self.num_parts):
-                action_prob = self.agent(hidden_states)
-                padded_prob = torch.ones((bsz, self.agent.action_classifier.out_features), device=device)
+                action_prob = self.simple_agent(hidden_states)
+                padded_prob = torch.ones((bsz, self.simple_agent.action_classifier.out_features), device=device)
                 padded_prob[left_idx] = action_prob
                 action_probs.append(padded_prob)
                 # policy gradient

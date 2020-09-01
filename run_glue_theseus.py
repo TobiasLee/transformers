@@ -126,6 +126,10 @@ class ModelArguments:
     early_exit_idx: Optional[int] = field(
         default=-1, metadata={"help": "path penalty for selecting large block"}
     )
+
+    logging_paths: bool = field(
+        default=False, metadata={"help" : "whether plotting paths learned during evaluating"} 
+    )
     #
     # parser.add_argument("--replacing_rate", type=float, required=True,
     #                     help="Constant replacing rate. Also base replacing rate if using a scheduler.")
@@ -222,7 +226,7 @@ def main():
             model.bert.init_highway_pooler()
 
     if model_args.train_agent:
-        model.set_switch_mode(True)  # using switch mode
+        model.bert.encoder.train_agent = True # using switch mode
         if model_args.only_large_and_exit:
             model.bert.encoder.only_large_and_exit = True
 
@@ -286,6 +290,9 @@ def main():
                 {'params': [p for p in model.bert.encoder.agent.parameters()],
                  "weight_decay": training_args.weight_decay
                  },
+                {'params': [p for p in model.bert.encoder.simple_agent.parameters()],
+                 "weight_decay": training_args.weight_decay
+                 },
                 # {'params': [p for p in model.bert.encoder.early_classifiers.parameters()]}
             ])
         else:
@@ -327,7 +334,8 @@ def main():
         eval_dataset=eval_dataset,
         compute_metrics=build_compute_metrics_fn(data_args.task_name),
         theseus_replace_scheduler=replacing_rate_scheduler,
-        optimizer_grouped_parameters=optimizer_grouped_parameters
+        optimizer_grouped_parameters=optimizer_grouped_parameters,
+        logging_paths=model_args.logging_paths
     )
 
     # Training
@@ -356,7 +364,7 @@ def main():
 
         for eval_dataset in eval_datasets:
             trainer.compute_metrics = build_compute_metrics_fn(eval_dataset.args.task_name)
-            eval_result = trainer.evaluate(eval_dataset=eval_dataset, require_paths=False)
+            eval_result = trainer.evaluate(eval_dataset=eval_dataset, require_paths=model_args.logging_paths)
             output_eval_file = os.path.join(
                 training_args.output_dir, f"eval_results_{eval_dataset.args.task_name}.txt"
             )

@@ -181,6 +181,7 @@ class Trainer:
             optimizers: Tuple[torch.optim.Optimizer, torch.optim.lr_scheduler.LambdaLR] = None,
             theseus_replace_scheduler=None,
             optimizer_grouped_parameters=None,
+            logging_paths=False
     ):
         """
         Trainer is a simple but feature-complete training and eval loop for PyTorch,
@@ -203,6 +204,7 @@ class Trainer:
         self.optimizers = optimizers
         self.optimizer_grouped_parameters = optimizer_grouped_parameters
         self.theseus_replace_scheduler = theseus_replace_scheduler
+        self.logging_paths = logging_paths
         if tb_writer is not None:
             self.tb_writer = tb_writer
         elif is_tensorboard_available() and self.is_world_master():
@@ -526,7 +528,7 @@ class Trainer:
                         self._log(logs)
 
                         if self.args.evaluate_during_training:
-                            self.evaluate()
+                            self.evaluate(require_paths=self.logging_paths)
 
                     if self.args.save_steps > 0 and self.global_step % self.args.save_steps == 0:
                         # In all cases (even distributed/parallel), self.model is always a reference
@@ -843,6 +845,7 @@ class Trainer:
 
         expected_saving = 1.0
         if len(paths) > 0:
+            print(paths[:20])
             total_sum = 0.0
             for batch_path in paths:
                 total_sum += np.sum(batch_path.cpu().numpy())
