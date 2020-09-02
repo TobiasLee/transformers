@@ -597,7 +597,10 @@ class BertForSequenceClassification(BertPreTrainedModel):
                         loss_fct = CrossEntropyLoss()
                         early_loss = loss_fct(early_logits.view(-1, self.num_labels), labels.view(-1))
                     early_losses.append(early_loss)
-                loss = sum(early_losses)
+                if not self.training and self.bert.encoder.early_exit_idx != -1:
+                    loss = early_losses[self.bert.encoder.early_exit_idx]
+                else:
+                    loss = sum(early_losses)               
 
             if action_probs is not None:
                 bsz = logits.size()[0]

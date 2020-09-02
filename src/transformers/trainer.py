@@ -847,7 +847,7 @@ class Trainer:
 
         expected_saving = 1.0
         if len(paths) > 0:
-            print(paths[:200])
+            print(paths[:20])
             total_sum = 0.0
             for batch_path in paths:
                 total_sum += np.sum(batch_path.cpu().numpy()) * 2
