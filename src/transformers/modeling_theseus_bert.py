@@ -525,12 +525,16 @@ class BertForSequenceClassification(BertPreTrainedModel):
 
         self.init_weights()
         self.path_penalty_ratio = 0.0
+        self.use_baseline = False
 
     def set_switch_pattern(self, switch_pattern):
         self.bert.encoder.switch_pattern = switch_pattern
 
     def set_path_penalty(self, penalty_ratio):
         self.path_penalty_ratio = penalty_ratio
+
+    def set_baseline(self):
+        self.use_baseline = True
 
     def forward(self, input_ids=None, attention_mask=None, token_type_ids=None,
                 position_ids=None, head_mask=None, inputs_embeds=None, labels=None):
@@ -637,6 +641,8 @@ class BertForSequenceClassification(BertPreTrainedModel):
 
                 penalty_reward = - self.path_penalty_ratio * path_penalty
                 reward = performance_reward + penalty_reward
+                if self.use_baseline:
+                    reward = reward - torch.mean(reward)  # minus baseline
                 reward = torch.mean(reward *
                                     torch.log(final_decision_prob + 1e-9))  # sum over bsz
                 # if self.training:

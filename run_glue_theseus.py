@@ -111,6 +111,11 @@ class ModelArguments:
         default=False, metadata={"help": "open when first stage for training the early exit classifiers"}
     )
 
+    use_baseline: bool = field(
+        default=False, metadata={"help": "minus a baseline reward when PG"}
+    )
+
+
     train_agent: bool = field(
         default=False, metadata={"help": "second stage for training the switch agent "}
     )
@@ -266,6 +271,10 @@ def main():
     # Prepare optimizer and schedule (linear warmup and decay)
     no_decay = ['bias', 'LayerNorm.weight']
     optimizer_grouped_parameters = []
+
+    if model_args.use_baseline:
+        model.set_baseline()
+
     if not model_args.fix_scc_layer:
         optimizer_grouped_parameters.extend([
             {'params': [p for n, p in model.bert.encoder.scc_layer.named_parameters() if
