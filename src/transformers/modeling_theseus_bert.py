@@ -644,7 +644,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
                 # else:
                 # decouple early exit training & agent training
                 loss = - reward
-                outputs = outputs + (torch.mean(penalty_reward), torch.mean(performance_reward), paths, )
+                outputs = outputs + (final_decision_prob, torch.mean(penalty_reward), torch.mean(performance_reward), paths, )
                 # minus reward + penalty
             outputs = (loss,) + outputs
 

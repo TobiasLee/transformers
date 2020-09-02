@@ -773,6 +773,7 @@ class Trainer:
         eval_losses: List[float] = []
         eval_classification_reward: List[float] = []
         eval_path_reward: List[float] = []
+        eval_path_prob: List = []
         preds: torch.Tensor = None
         label_ids: torch.Tensor = None
         learned_head_masks: torch.Tensor = None
@@ -803,8 +804,10 @@ class Trainer:
                     paths.append(results_paths.detach())
                     performance_reward = outputs[-2]
                     path_reward = outputs[-3]
+                    path_prob = outputs[-4]
                     eval_classification_reward += [performance_reward.mean().item()]
                     eval_path_reward += [path_reward.mean().item()]
+                    eval_path_prob += [path_prob.mean().item()]
                 # if require_head_masks:
                 #     head_masks = outputs[-1] # the last one， tuple: (Tensor(bsz,  num_attention_heads, seq_len, 1), )
                 #     head_masks = torch.stack(head_masks).squeeze() # (12, bsz, num_heads, seq_len, 1)
@@ -848,6 +851,7 @@ class Trainer:
         expected_saving = 1.0
         if len(paths) > 0:
             print(paths[:20])
+            print(eval_path_prob[:20])
             total_sum = 0.0
             for batch_path in paths:
                 total_sum += np.sum(batch_path.cpu().numpy()) * 2
@@ -865,6 +869,9 @@ class Trainer:
             metrics["eval_classification_reward"] = np.mean(eval_classification_reward)
         if len(eval_path_reward) > 0:
             metrics["eval_path_reward"] = np.mean(eval_path_reward)
+
+        if len(eval_path_reward) > 0:
+            metrics["eval_path_prob"] = np.mean(eval_path_prob)
 
         # Prefix all keys with eval_
         for key in list(metrics.keys()):
