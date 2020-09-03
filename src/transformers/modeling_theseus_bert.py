@@ -275,15 +275,16 @@ class BertEncoder(nn.Module):
             left_idx = torch.arange(bsz, device=device)
             large_interval = self.prd_n_layer // self.num_parts
             # training with a switch agent
-            action_probs = []
-            actions = []
+            action_probs = ()
+            actions = ()
+            early_exit_logits = ()
+            early_exit_idxs = ()
 
-            early_exit_pairs = []
             for i in range(self.num_parts):
                 action_prob = self.simple_agent(hidden_states)
                 padded_prob = torch.ones((bsz, self.simple_agent.action_classifier.out_features), device=device)
                 padded_prob[left_idx] = action_prob
-                action_probs.append(padded_prob)
+                action_probs = action_probs + (padded_prob, )
                 # policy gradient
                 if self.training:
                     m = Categorical(action_prob)
@@ -292,12 +293,13 @@ class BertEncoder(nn.Module):
                     action = torch.argmax(action_prob, dim=-1)
                 padded_action = torch.zeros(size=(bsz,), device=device, dtype=torch.long)
                 padded_action[left_idx] = action
-                actions.append(padded_action)
+                actions = actions + (padded_action, )
 
                 exit_idx = left_idx[action == 0]  # using 0 for current code
                 if len(exit_idx) > 0:
                     exited_logit = self.early_classifiers[i](hidden_states)[action == 0]
-                    early_exit_pairs.append((exited_logit, exit_idx))
+                    early_exit_logits = early_exit_logits + (exited_logit,)
+                    early_exit_idxs = early_exit_idxs + (exit_idx, )
 
                 left_idx = left_idx[action == 1]  # large action idx = 1
                 # to implement acceleration, exited examples are not supposed to continue the forward loop
@@ -317,21 +319,12 @@ class BertEncoder(nn.Module):
                 #     all_attentions = all_attentions + (blocks_outputs,)
 
             outputs = (hidden_states,)
-            # stack results for fp 16
-            stacked_probs = torch.cat([p.unsqueeze(0) for p in action_probs], dim=0)  # num_parts, bsz, actio_space
-            stacked_action = torch.cat([a.unsqueeze(0) for a in actions])  # num_parts, bsz,
-            if len(early_exit_pairs) > 0:
-                early_exit_logit = torch.cat([p[0] for p in early_exit_pairs], dim=0)  # num_exited,  num_labels
-                early_exit_idx = torch.cat([p[1] for p in early_exit_pairs], dim=0)  # num_exited,
-            else:
-                early_exit_logit = torch.zeros((0, self.config.num_labels), device=device)
-                early_exit_idx = torch.zeros((0,), dtype=torch.long, device=device)  # create zero tensor for multi-gpu
 
             outputs = outputs + (left_idx,
-                                 stacked_probs,
-                                 stacked_action,
-                                 early_exit_logit,
-                                 early_exit_idx
+                                 action_probs,
+                                 actions,
+                                 early_exit_logits,
+                                 early_exit_idxs
                                  )  # action_probs for computing loss
             if self.output_hidden_states:
                 outputs = outputs + (all_hidden_states,)
