@@ -194,7 +194,7 @@ class BertEncoder(nn.Module):
                     action = torch.argmax(action_prob, dim=-1)
                 padded_action = torch.zeros(size=(bsz,), device=device, dtype=torch.long)
                 padded_action[left_idx] = action
-                actions = actions + (action,)
+                actions = actions + (padded_action,)
                 exit_idx = left_idx[action == 0]  # using 0 for current code
                 if len(exit_idx) > 0:
                     exited_logit = self.early_classifiers[i](hidden_states)[action == 0]
@@ -260,7 +260,7 @@ class BertEncoder(nn.Module):
                                  actions,
                                  early_exit_logits,
                                  early_exit_idxs,
-                                 stacked_internal_classifier_logits,
+                                 internal_classifier_logits,
                                  )  # action_probs for computing loss
             if self.output_hidden_states:
                 outputs = outputs + (all_hidden_states,)
