@@ -638,11 +638,12 @@ class BertForSequenceClassification(BertPreTrainedModel):
                 else:
                     mse_reward_fct = MSELoss(reduction='none')
                     performance_reward = - mse_reward_fct(logits.view(-1), labels.view(-1))
-
+                if self.use_baseline:
+                    path_penalty = path_penalty - torch.mean(path_penalty) 
                 penalty_reward = - self.path_penalty_ratio * path_penalty
                 reward = performance_reward + penalty_reward
-                if self.use_baseline:
-                    reward = reward - torch.mean(reward)  # minus baseline
+                #if self.use_baseline:
+                #    reward = reward - torch.mean(reward)  # minus baseline
                 reward = torch.mean(reward *
                                     torch.log(final_decision_prob + 1e-9))  # sum over bsz
                 # if self.training:
