@@ -100,7 +100,7 @@ if _has_sklearn:
         elif task_name == "hans":
             return {"acc": simple_accuracy(preds, labels)}
         elif task_name == 'twentyng':
-            return acc_and_all_f1
+            return acc_and_all_f1(preds, labels) 
         else:
             raise KeyError(task_name)
 
