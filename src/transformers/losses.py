@@ -5,6 +5,17 @@ from torch.nn import functional as F
 from torch.nn.modules.loss import _WeightedLoss, _Loss
 
 
+def cal_effective_weight(cls_num_list, beta=0.9999):
+    # cls_num_list frequency of each class, shape:[num_classes]
+    # to calculate weight
+    import numpy as np
+    effective_num = 1.0 - np.power(beta, cls_num_list)
+    per_cls_weights = (1.0 - beta) / np.array(effective_num)
+    per_cls_weights = per_cls_weights / np.sum(per_cls_weights) * len(cls_num_list)
+    weight = torch.FloatTensor(per_cls_weights).cuda()
+    return weight
+
+
 class SigmoidMixedLoss(_Loss):  # used for illustration experiment
     def __init__(self, alpha=-1, gamma=2, beta=1, reduction='mean', size_average=None, reduce=None):
         super(SigmoidMixedLoss, self).__init__(size_average, reduce, reduction)
@@ -76,7 +87,7 @@ class CourageLoss(_WeightedLoss):
             all_loss = mle_loss + c_loss
         else:
             all_loss = mle_loss
-        return all_loss, org_loss
+        return all_loss
 
 
 class SelfAdjDiceLoss(_WeightedLoss):
