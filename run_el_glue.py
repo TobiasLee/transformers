@@ -73,6 +73,14 @@ class ModelArguments:
         default=1.0, metadata={"help": "Gamma for focal loss"}
     )
 
+    el_end: Optional[float] = field(
+        default=-1, metadata={"help": "end epoch of encourage loss "}
+    )
+
+    el_start: Optional[float] = field(
+        default=-1, metadata={"help": "start epoch of encouarge loss"}
+    )
+
 
 def main():
     # See all possible arguments in src/transformers/training_args.py
@@ -186,6 +194,8 @@ def main():
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         compute_metrics=build_compute_metrics_fn(data_args.task_name),
+        el_start_epoch=model_args.el_start,
+        el_end_epoch=model_args.el_end
     )
 
     # Training
