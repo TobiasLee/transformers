@@ -643,7 +643,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
                     # we can add an expected saving computation here
                     # print("Layer ratio: %.3f%%" % (
                     #         (torch.sum(paths) / torch.sum(all_large, dtype=torch.float)).item() * 100))
-                    # print(paths[:4])  # sample for some path
+                    print(paths[:4])  # sample for some path
 
                 if self.num_labels != 1:
                     entropy_reward_fct = CrossEntropyLoss(reduction='none')
