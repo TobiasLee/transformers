@@ -238,6 +238,7 @@ class PretrainedConfig(object):
                 resume_download=resume_download,
                 local_files_only=local_files_only,
             )
+            print(config_file)
             # Load config dict
             if resolved_config_file is None:
                 raise EnvironmentError

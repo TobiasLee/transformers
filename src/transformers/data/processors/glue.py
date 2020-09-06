@@ -24,7 +24,6 @@ from ...file_utils import is_tf_available
 from ...tokenization_utils import PreTrainedTokenizer
 from .utils import DataProcessor, InputExample, InputFeatures
 
-
 if is_tf_available():
     import tensorflow as tf
 
@@ -32,12 +31,12 @@ logger = logging.getLogger(__name__)
 
 
 def glue_convert_examples_to_features(
-    examples: Union[List[InputExample], "tf.data.Dataset"],
-    tokenizer: PreTrainedTokenizer,
-    max_length: Optional[int] = None,
-    task=None,
-    label_list=None,
-    output_mode=None,
+        examples: Union[List[InputExample], "tf.data.Dataset"],
+        tokenizer: PreTrainedTokenizer,
+        max_length: Optional[int] = None,
+        task=None,
+        label_list=None,
+        output_mode=None,
 ):
     """
     Loads a data file into a list of ``InputFeatures``
@@ -68,7 +67,7 @@ def glue_convert_examples_to_features(
 if is_tf_available():
 
     def _tf_glue_convert_examples_to_features(
-        examples: tf.data.Dataset, tokenizer: PreTrainedTokenizer, task=str, max_length: Optional[int] = None,
+            examples: tf.data.Dataset, tokenizer: PreTrainedTokenizer, task=str, max_length: Optional[int] = None,
     ) -> tf.data.Dataset:
         """
         Returns:
@@ -105,12 +104,12 @@ if is_tf_available():
 
 
 def _glue_convert_examples_to_features(
-    examples: List[InputExample],
-    tokenizer: PreTrainedTokenizer,
-    max_length: Optional[int] = None,
-    task=None,
-    label_list=None,
-    output_mode=None,
+        examples: List[InputExample],
+        tokenizer: PreTrainedTokenizer,
+        max_length: Optional[int] = None,
+        task=None,
+        label_list=None,
+        output_mode=None,
 ):
     if max_length is None:
         max_length = tokenizer.max_len
@@ -337,6 +336,30 @@ class ColaProcessor(DataProcessor):
             label = None if test_mode else line[1]
             examples.append(InputExample(guid=guid, text_a=text_a, text_b=None, label=label))
         return examples
+
+
+class TwentyNGProcessor(DataProcessor):
+    def get_dev_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(self._read_tsv(os.path.join(data_dir, "test.tsv")), "dev")
+
+    def get_train_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(self._read_tsv(os.path.join(data_dir, "train.tsv.unbal.0.100")), "train")
+
+    def _create_examples(self, lines, set_type):
+        """Creates examples for the training, dev and test sets."""
+        examples = []
+        for (i, line) in enumerate(lines):
+            guid = "%s-%s" % (set_type, i)
+            text_a = line[0]
+            label = None if set_type == "test" else line[1]
+            examples.append(InputExample(guid=guid, text_a=text_a, text_b=None, label=label))
+        return examples
+
+    def get_labels(self):
+        """See base class."""
+        return ["%d" % i for i in range(20)]
 
 
 class Sst2Processor(DataProcessor):
@@ -608,6 +631,7 @@ glue_tasks_num_labels = {
     "rte": 2,
     "wnli": 2,
     "persona": 2,
+    'twentyng': 20,
 }
 
 glue_processors = {
@@ -622,6 +646,7 @@ glue_processors = {
     "qnli": QnliProcessor,
     "rte": RteProcessor,
     "wnli": WnliProcessor,
+    'twentyng': TwentyNGProcessor
 }
 
 glue_output_modes = {
@@ -636,4 +661,5 @@ glue_output_modes = {
     "qnli": "classification",
     "rte": "classification",
     "wnli": "classification",
+    'twentyng': "classification"
 }

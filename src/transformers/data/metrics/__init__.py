@@ -46,6 +46,24 @@ if _has_sklearn:
             "acc_and_f1": (acc + f1) / 2,
         }
 
+    def acc_and_all_f1(preds, labels):
+        acc = simple_accuracy(preds, labels)
+        micro_f1 = f1_score(y_true=labels, y_pred=preds, average='micro')
+        macro_f1 = f1_score(y_true=labels, y_pred=preds, average='macro')
+        micro_precision = precision_score(y_true=labels, y_pred=preds, average='micro')
+        micro_recall = recall_score(y_true=labels, y_pred=preds, average='micro')
+        macro_precision = precision_score(y_true=labels, y_pred=preds, average='macro')
+        macro_recall = recall_score(y_true=labels, y_pred=preds, average='macro')
+        return {
+            "acc": acc,
+            "micro_f1": micro_f1,
+            "macro_f1": macro_f1,
+            "micro_precision": micro_precision,
+            "macro_precision": macro_precision,
+            "micro_recall": micro_recall,
+            "macro_recall": macro_recall,
+        }
+
     def pearson_and_spearman(preds, labels):
         pearson_corr = pearsonr(preds, labels)[0]
         spearman_corr = spearmanr(preds, labels)[0]
@@ -81,6 +99,8 @@ if _has_sklearn:
             return {"acc": simple_accuracy(preds, labels)}
         elif task_name == "hans":
             return {"acc": simple_accuracy(preds, labels)}
+        elif task_name == 'twentyng':
+            return acc_and_all_f1(preds, labels) 
         else:
             raise KeyError(task_name)
 

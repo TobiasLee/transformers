@@ -275,15 +275,16 @@ class BertEncoder(nn.Module):
             left_idx = torch.arange(bsz, device=device)
             large_interval = self.prd_n_layer // self.num_parts
             # training with a switch agent
-            action_probs = []
-            actions = []
+            action_probs = ()
+            actions = ()
+            early_exit_logits = ()
+            early_exit_idxs = ()
 
-            early_exit_pairs = []
             for i in range(self.num_parts):
                 action_prob = self.simple_agent(hidden_states)
                 padded_prob = torch.ones((bsz, self.simple_agent.action_classifier.out_features), device=device)
                 padded_prob[left_idx] = action_prob
-                action_probs.append(padded_prob)
+                action_probs = action_probs + (padded_prob,)
                 # policy gradient
                 if self.training:
                     m = Categorical(action_prob)
@@ -292,12 +293,13 @@ class BertEncoder(nn.Module):
                     action = torch.argmax(action_prob, dim=-1)
                 padded_action = torch.zeros(size=(bsz,), device=device, dtype=torch.long)
                 padded_action[left_idx] = action
-                actions.append(padded_action)
+                actions = actions + (padded_action,)
 
                 exit_idx = left_idx[action == 0]  # using 0 for current code
                 if len(exit_idx) > 0:
                     exited_logit = self.early_classifiers[i](hidden_states)[action == 0]
-                    early_exit_pairs.append((exited_logit, exit_idx))
+                    early_exit_logits = early_exit_logits + (exited_logit,)
+                    early_exit_idxs = early_exit_idxs + (exit_idx,)
 
                 left_idx = left_idx[action == 1]  # large action idx = 1
                 # to implement acceleration, exited examples are not supposed to continue the forward loop
@@ -317,21 +319,12 @@ class BertEncoder(nn.Module):
                 #     all_attentions = all_attentions + (blocks_outputs,)
 
             outputs = (hidden_states,)
-            # stack results for fp 16
-            stacked_probs = torch.cat([p.unsqueeze(0) for p in action_probs], dim=0)  # num_parts, bsz, actio_space
-            stacked_action = torch.cat([a.unsqueeze(0) for a in actions])  # num_parts, bsz,
-            if len(early_exit_pairs) > 0:
-                early_exit_logit = torch.cat([p[0] for p in early_exit_pairs], dim=0)  # num_exited,  num_labels
-                early_exit_idx = torch.cat([p[1] for p in early_exit_pairs], dim=0)  # num_exited,
-            else:
-                early_exit_logit = torch.zeros((0, self.config.num_labels), device=device)
-                early_exit_idx = torch.zeros((0,), dtype=torch.long, device=device)  # create zero tensor for multi-gpu
 
             outputs = outputs + (left_idx,
-                                 stacked_probs,
-                                 stacked_action,
-                                 early_exit_logit,
-                                 early_exit_idx
+                                 action_probs,
+                                 actions,
+                                 early_exit_logits,
+                                 early_exit_idxs
                                  )  # action_probs for computing loss
             if self.output_hidden_states:
                 outputs = outputs + (all_hidden_states,)
@@ -383,6 +376,24 @@ class BertEncoder(nn.Module):
         if self.output_attentions:
             outputs = outputs + (all_attentions,)
         return outputs  # last-layer hidden state, (all hidden states), (all attentions)
+
+
+class LinearPenaltyRatioScheduler:
+    def __init__(self, model, initial_penalty_ratio, linear_k, max_penalty_ratio):
+        self.model = model
+        self.linear_k = linear_k
+        self.initial_pr = initial_penalty_ratio
+        self.step_counter = 0
+        self.max_penalty_ratio = max_penalty_ratio
+        self.current_pr = initial_penalty_ratio
+
+    def step(self):
+        self.step_counter += 1
+        current_pr = min(self.max_penalty_ratio,
+                         self.linear_k * self.step_counter + self.initial_pr)
+        self.model.set_path_penalty(current_pr)
+        self.current_pr = current_pr
+        return current_pr
 
 
 class ConstantReplacementScheduler:
@@ -571,9 +582,9 @@ class BertForSequenceClassification(BertPreTrainedModel):
         # early_exit_logit = torch.cat([p[0] for p in early_exit_pairs], dim=0)
         # early_exit_idx = torch.cat([p[1] for p in early_exit_pairs], dim=0)
         if early_exit_idx is not None and len(early_exit_idx) > 0:  # if early exit happens, re-order it back
-            total_idx = torch.cat(early_exit_idx + (left_idx, ), dim=0)
+            total_idx = torch.cat(early_exit_idx + (left_idx,), dim=0)
             _, order = torch.sort(total_idx)
-            logits = torch.cat(early_exit_logit + (logits, ), dim=0)[order]
+            logits = torch.cat(early_exit_logit + (logits,), dim=0)[order]
 
         if self.bert.encoder.early_exit_idx != -1 and self.bert.encoder.train_early_exit:  # test for specific early exit
             logits = internal_classifier_logits[self.bert.encoder.early_exit_idx]
@@ -641,10 +652,10 @@ class BertForSequenceClassification(BertPreTrainedModel):
                     mse_reward_fct = MSELoss(reduction='none')
                     performance_reward = - mse_reward_fct(logits.view(-1), labels.view(-1))
                 if self.use_baseline:
-                    path_penalty = path_penalty - torch.mean(path_penalty) 
+                    path_penalty = path_penalty - torch.mean(path_penalty)
                 penalty_reward = - self.path_penalty_ratio * path_penalty
                 reward = performance_reward + penalty_reward
-                #if self.use_baseline:
+                # if self.use_baseline:
                 #    reward = reward - torch.mean(reward)  # minus baseline
                 reward = torch.mean(reward *
                                     torch.log(final_decision_prob + 1e-9))  # sum over bsz
@@ -654,7 +665,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
                 # decouple early exit training & agent training
                 loss = - reward
                 outputs = outputs + (
-                final_decision_prob, torch.mean(penalty_reward), torch.mean(performance_reward), paths,)
+                    final_decision_prob, torch.mean(penalty_reward), torch.mean(performance_reward), paths,)
                 # minus reward + penalty
             outputs = (loss,) + outputs
 
