@@ -324,7 +324,7 @@ def main():
         if training_args.do_predict
         else None
     )
-
+    # train_dataset = eval_dataset # for testing agent capability  
     def build_compute_metrics_fn(task_name: str) -> Callable[[EvalPrediction], Dict]:
         def compute_metrics_fn(p: EvalPrediction):
             if output_mode == "classification":
