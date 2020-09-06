@@ -13,7 +13,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
+import sys
 import csv
 import dataclasses
 import json
@@ -25,7 +25,7 @@ from ...file_utils import is_tf_available, is_torch_available
 
 
 logger = logging.getLogger(__name__)
-
+csv.field_size_limit(sys.maxsize) 
 
 @dataclass
 class InputExample:

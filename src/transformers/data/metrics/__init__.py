@@ -49,7 +49,7 @@ if _has_sklearn:
     def acc_and_all_f1(preds, labels):
         acc = simple_accuracy(preds, labels)
         micro_f1 = f1_score(y_true=labels, y_pred=preds, average='micro')
-        macro_f1 = f1_score(y_true=labels, y_pred=preds, average='marco')
+        macro_f1 = f1_score(y_true=labels, y_pred=preds, average='macro')
         micro_precision = precision_score(y_true=labels, y_pred=preds, average='micro')
         micro_recall = recall_score(y_true=labels, y_pred=preds, average='micro')
         macro_precision = precision_score(y_true=labels, y_pred=preds, average='macro')

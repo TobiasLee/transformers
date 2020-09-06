@@ -345,7 +345,7 @@ class TwentyNGProcessor(DataProcessor):
 
     def get_train_examples(self, data_dir):
         """See base class."""
-        return self._create_examples(self._read_tsv(os.path.join(data_dir, "train.tsv.unbal.0.100")), "dev")
+        return self._create_examples(self._read_tsv(os.path.join(data_dir, "train.tsv.unbal.0.100")), "train")
 
     def _create_examples(self, lines, set_type):
         """Creates examples for the training, dev and test sets."""
