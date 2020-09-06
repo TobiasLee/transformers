@@ -78,7 +78,15 @@ class ModelArguments:
     )
 
     el_start: Optional[float] = field(
-        default=-1, metadata={"help": "start epoch of encouarge loss"}
+        default=-1, metadata={"help": "start epoch of encourage loss"}
+    )
+
+    el_gamma: Optional[float] = field(
+        default=-1, metadata={"help": "el gamma"}
+    )
+
+    el_beta: Optional[float] = field(
+        default=0.999, metadata={"help": "el beta, for calculating effective num cls"}
     )
 
 
@@ -159,8 +167,7 @@ def main():
         model.set_loss_type(model_args.loss_type, {"gamma": model_args.dl_gamma})
     elif model_args.loss_type == 'el':  # encourage loss
         model.set_loss_type('el', {"bonus_gamma": model_args.el_gamma,
-                                   "beta": model_args.el_beta,
-                                   "start_epoch": model_args.start_epoch})
+                                   "beta": model_args.el_beta})
     # Get datasets
     train_dataset = (
         GlueDataset(data_args, tokenizer=tokenizer, evaluate=False) #cache_dir=model_args.cache_dir) 
