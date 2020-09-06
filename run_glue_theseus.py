@@ -29,7 +29,7 @@ import torch.nn as nn
 from transformers import AutoConfig, AutoModelForSequenceClassification, AutoTokenizer, EvalPrediction, GlueDataset, \
     AdamW, get_linear_schedule_with_warmup
 from transformers.modeling_theseus_bert import BertForSequenceClassification, LinearReplacementScheduler, \
-    ConstantReplacementScheduler
+    ConstantReplacementScheduler, LinearPenaltyRatioScheduler
 from transformers import GlueDataTrainingArguments as DataTrainingArguments
 from transformers import (
     HfArgumentParser,
@@ -115,7 +115,6 @@ class ModelArguments:
         default=False, metadata={"help": "minus a baseline reward when PG"}
     )
 
-
     train_agent: bool = field(
         default=False, metadata={"help": "second stage for training the switch agent "}
     )
@@ -133,8 +132,21 @@ class ModelArguments:
     )
 
     logging_paths: bool = field(
-        default=False, metadata={"help" : "whether plotting paths learned during evaluating"} 
+        default=False, metadata={"help": "whether plotting paths learned during evaluating"}
     )
+
+    pr_schedule: bool = field(
+        default=False, metadata={"help": "use penalty ratio scheduler"}
+    )
+
+    pr_linear_k: Optional[float] = field(
+        default=0.001, metadata={"help": "increase ratio for linear schedule penalty ratio"}
+    )
+
+    pr_init_value: Optional[float] = field(
+        default=0.0, metadata={"help": "initial increase ratio for linear schedule penalty ratio"}
+    )
+
     #
     # parser.add_argument("--replacing_rate", type=float, required=True,
     #                     help="Constant replacing rate. Also base replacing rate if using a scheduler.")
@@ -231,7 +243,7 @@ def main():
             model.bert.init_highway_pooler()
 
     if model_args.train_agent:
-        model.bert.encoder.train_agent = True # using switch mode
+        model.bert.encoder.train_agent = True  # using switch mode
         if model_args.only_large_and_exit:
             model.bert.encoder.only_large_and_exit = True
 
@@ -256,8 +268,18 @@ def main():
         model.bert.encoder.scc_layer = nn.ModuleList(
             [deepcopy(model.bert.encoder.layer[ix]) for ix in range(scc_n_layer)])
 
-    if model_args.path_penalty_ratio > 0:
-        logger.info("setting path penalty to: %.6f" % model_args.path_penalty_ratio)
+    if model_args.pr_schedule:
+        logger.info("linearly increase penalty ratio from %.6f to  %.6f with linear_k %.6f" % (model_args.pr_init_value,
+                                                                                               model_args.path_penalty_ratio,
+                                                                                               model_args.pr_linear_k))
+        pr_scheduler = LinearPenaltyRatioScheduler(model,
+                                                   initial_penalty_ratio=model_args.pr_init_value,
+                                                   linear_k=model_args.pr_linear_k,
+                                                   max_penalty_ratio=model_args.path_penalty_ratio)
+    else:
+        if model_args.path_penalty_ratio > 0:
+            logger.info("setting path penalty to: %.6f" % model_args.path_penalty_ratio)
+        pr_scheduler = None
         model.set_path_penalty(model_args.path_penalty_ratio)
     # if model_args.freeze_teacher:
     #     for p in model.bert.encoder.layer.parameters():
@@ -344,7 +366,8 @@ def main():
         compute_metrics=build_compute_metrics_fn(data_args.task_name),
         theseus_replace_scheduler=replacing_rate_scheduler,
         optimizer_grouped_parameters=optimizer_grouped_parameters,
-        logging_paths=model_args.logging_paths
+        logging_paths=model_args.logging_paths,
+        pr_scheduler=pr_scheduler
     )
 
     # Training
