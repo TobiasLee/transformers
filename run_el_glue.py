@@ -145,11 +145,14 @@ def main():
         config=config,
         cache_dir=model_args.cache_dir,
     )
-    if model_args.loss_type == 'fl': # focal_loss
+    if model_args.loss_type == 'fl':  # focal_loss
         model.set_loss_type(model_args.loss_type, {"gamma": model_args.fl_gamma})
-    elif model_args.loss_type == 'dl': # dice loss
+    elif model_args.loss_type == 'dl':  # dice loss
         model.set_loss_type(model_args.loss_type, {"gamma": model_args.dl_gamma})
-
+    elif model_args.loss_type == 'el':  # encourage loss
+        model.set_loss_type('el', {"bonus_gamma": model_args.el_gamma,
+                                   "beta": model_args.el_beta,
+                                   "start_epoch": model_args.start_epoch})
     # Get datasets
     train_dataset = (
         GlueDataset(data_args, tokenizer=tokenizer, evaluate=False) #cache_dir=model_args.cache_dir) 

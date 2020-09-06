@@ -29,7 +29,7 @@ from .activations import gelu, gelu_new, swish
 from .configuration_bert import BertConfig
 from .file_utils import add_start_docstrings, add_start_docstrings_to_callable
 from .modeling_utils import PreTrainedModel, prune_linear_layer
-from .losses import  FocalLoss, SelfAdjDiceLoss
+from .losses import FocalLoss, SelfAdjDiceLoss, CourageLoss
 
 logger = logging.getLogger(__name__)
 
@@ -1218,6 +1218,8 @@ class BertForSequenceClassification(BertPreTrainedModel):
                     loss_fct = FocalLoss(**self.loss_config)
                 elif self.loss_type == 'dl':
                     loss_fct = SelfAdjDiceLoss(**self.loss_config)
+                elif self.loss_type == 'el':
+                    loss_fct = CourageLoss(**self.loss_config)
                 loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
 
             outputs = (loss,) + outputs
