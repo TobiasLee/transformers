@@ -181,7 +181,8 @@ class Trainer:
             optimizers: Tuple[torch.optim.Optimizer, torch.optim.lr_scheduler.LambdaLR] = None,
             theseus_replace_scheduler=None,
             optimizer_grouped_parameters=None,
-            logging_paths=False
+            logging_paths=False,
+            pr_scheduler=None
     ):
         """
         Trainer is a simple but feature-complete training and eval loop for PyTorch,
@@ -205,6 +206,7 @@ class Trainer:
         self.optimizer_grouped_parameters = optimizer_grouped_parameters
         self.theseus_replace_scheduler = theseus_replace_scheduler
         self.logging_paths = logging_paths
+        self.pr_scheduler = pr_scheduler
         if tb_writer is not None:
             self.tb_writer = tb_writer
         elif is_tensorboard_available() and self.is_world_master():
@@ -507,6 +509,8 @@ class Trainer:
                     scheduler.step()
                     if self.theseus_replace_scheduler is not None:
                         self.theseus_replace_scheduler.step()
+                    if self.pr_scheduler is not None:
+                        self.pr_scheduler.step()
                     model.zero_grad()
 
                     self.global_step += 1
@@ -523,6 +527,8 @@ class Trainer:
                             if version.parse(torch.__version__) >= version.parse("1.4")
                             else scheduler.get_lr()[0]
                         )
+                        if self.pr_scheduler is not None:
+                            logs["current_pr"] = self.pr_scheduler.current_pr
                         logging_loss = tr_loss
 
                         self._log(logs)
