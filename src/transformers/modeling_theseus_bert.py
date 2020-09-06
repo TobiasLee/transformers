@@ -646,8 +646,10 @@ class BertForSequenceClassification(BertPreTrainedModel):
                     # print(paths[:4])  # sample for some path
 
                 if self.num_labels != 1:
-                    entropy_reward_fct = CrossEntropyLoss(reduction='none')
-                    performance_reward = - entropy_reward_fct(logits.view(-1, self.num_labels), labels.view(-1))
+                    # entropy_reward_fct = CrossEntropyLoss(reduction='none')
+                    # performance_reward = - entropy_reward_fct(logits.view(-1, self.num_labels), labels.view(-1))
+                    predicted_labels = torch.argmax(logits, dim=-1)  # bsz
+                    performance_reward = - predicted_labels.eq(labels).type_as(logits)
                 else:
                     mse_reward_fct = MSELoss(reduction='none')
                     performance_reward = - mse_reward_fct(logits.view(-1), labels.view(-1))
