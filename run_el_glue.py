@@ -168,6 +168,8 @@ def main():
     elif model_args.loss_type == 'el':  # encourage loss
         model.set_loss_type('el', {"bonus_gamma": model_args.el_gamma,
                                    "beta": model_args.el_beta})
+    elif model_args.loss_type == 'rl':  # reweighted loss
+        model.set_loss_type('rl', {"beta": model_args.rl_beta})
     # Get datasets
     train_dataset = (
         GlueDataset(data_args, tokenizer=tokenizer, evaluate=False) #cache_dir=model_args.cache_dir) 
