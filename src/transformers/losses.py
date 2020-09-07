@@ -52,13 +52,30 @@ class SigmoidMixedLoss(_Loss):  # used for illustration experiment
         return loss
 
 
+class ReweightLoss(_WeightedLoss):
+    def __init__(self, weight=None, size_average=None, ignore_index=-100,
+                 reduce=None, reduction='mean',
+                 beta=0.9999):
+        super(ReweightLoss, self).__init__(weight, size_average, reduce, reduction)
+        self.ignore_idx = ignore_index
+        self.weight = cal_effective_weight(TWENTY_NG_UNBAL01_CLS_NUM_LIST, beta=beta)
+
+    def forward(self, input, target):
+        lprobs = F.log_softmax(input)
+        device = lprobs.device
+        weight = self.weight.to(device)
+        weighted_prob = weight * lprobs
+        mle_loss = F.nll_loss(weighted_prob, target, reduction='mean', ignore_index=self.ignore_idx)  # -y* log p
+        return mle_loss
+
+
 class CourageLoss(_WeightedLoss):
     def __init__(self, weight=None, size_average=None, ignore_index=-100,
                  reduce=None, reduction='mean', cl_eps=1e-5,
                  bonus_gamma=0.1, beta=0.9999):
         super(CourageLoss, self).__init__(weight, size_average, reduce, reduction)
         self.ignore_idx = ignore_index
-        self.weight = cal_effective_weight(TWENTY_NG_UNBAL01_CLS_NUM_LIST, beta=beta) # shape [num_classes]
+        self.weight = cal_effective_weight(TWENTY_NG_UNBAL01_CLS_NUM_LIST, beta=beta)  # shape [num_classes]
         self.cl_eps = cl_eps
         self.bonus_gamma = bonus_gamma
 
