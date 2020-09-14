@@ -4,6 +4,9 @@ import torch
 from torch.nn import functional as F
 from torch.nn.modules.loss import _WeightedLoss, _Loss
 
+TWENTY_NG_UNBAL01_CLS_NUM_LIST = [116, 230, 344, 287, 202, 372, 258, 457, 543, 514, 600, 486, 315, 429, 401, 571, 145,
+                                  173, 88, 59]
+
 
 def cal_effective_weight(cls_num_list, beta=0.9999):
     # cls_num_list frequency of each class, shape:[num_classes]
@@ -49,25 +52,37 @@ class SigmoidMixedLoss(_Loss):  # used for illustration experiment
         return loss
 
 
-class CourageLoss(_WeightedLoss):
+class ReweightLoss(_WeightedLoss):
     def __init__(self, weight=None, size_average=None, ignore_index=-100,
-                 reduce=None, reduction='mean', cl_eps=1e-5,
-                 bonus_gamma=0.1, num_labels=2):
-        super(CourageLoss, self).__init__(weight, size_average, reduce, reduction)
-        self.num_labels = num_labels
+                 reduce=None, reduction='mean',
+                 beta=0.9999):
+        super(ReweightLoss, self).__init__(weight, size_average, reduce, reduction)
         self.ignore_idx = ignore_index
-        # weight = cal_effective_weight(frequency_vector_of_classes, beta)
-        self.weight = weight  # shape [num_classes]
-        self.cl_eps = cl_eps
-        self.bonus_gamma = bonus_gamma
-
-    def set_weight(self, weight):  # set weight
-        self.weight = weight
+        self.weight = cal_effective_weight(TWENTY_NG_UNBAL01_CLS_NUM_LIST, beta=beta)
 
     def forward(self, input, target):
         lprobs = F.log_softmax(input)
+        device = lprobs.device
+        weight = self.weight.to(device)
+        weighted_prob = weight * lprobs
+        mle_loss = F.nll_loss(weighted_prob, target, reduction='mean', ignore_index=self.ignore_idx)  # -y* log p
+        return mle_loss
+
+
+class CourageLoss(_WeightedLoss):
+    def __init__(self, weight=None, size_average=None, ignore_index=-100,
+                 reduce=None, reduction='mean', cl_eps=1e-5,
+                 bonus_gamma=0.1, beta=0.9999):
+        super(CourageLoss, self).__init__(weight, size_average, reduce, reduction)
+        self.ignore_idx = ignore_index
+        self.weight = cal_effective_weight(TWENTY_NG_UNBAL01_CLS_NUM_LIST, beta=beta)  # shape [num_classes]
+        self.cl_eps = cl_eps
+        self.bonus_gamma = bonus_gamma
+
+    def forward(self, input, target):
+        lprobs = F.log_softmax(input)
+        device = lprobs.device
         mle_loss = F.nll_loss(lprobs, target, reduction='mean', ignore_index=self.ignore_idx)  # -y* log p
-        org_loss = mle_loss
         # if is_train and not (self.opt.defer_start and self.get_epoch() <= self.opt.defer_start):
         # defer encourage loss
         if self.training:
@@ -78,16 +93,17 @@ class CourageLoss(_WeightedLoss):
                 bonus = torch.log(torch.clamp((torch.ones_like(probs) - probs), min=self.cl_eps))  # likelihood bonus
             # weight_courage = self.weight / torch.max(self.weight) # bounded in [0,1]
             # weight_courage = self.weight  # unbounded
+            weight = self.weight.to(device)
             c_loss = F.nll_loss(
-                -bonus * self.weight,
+                -bonus * weight,
                 target.view(-1),
                 reduction='mean',
                 ignore_index=self.ignore_idx,
             )  # y*log(1-p)
-            all_loss = mle_loss + c_loss
+            loss = mle_loss + c_loss
         else:
-            all_loss = mle_loss
-        return all_loss
+            loss = mle_loss
+        return loss
 
 
 class SelfAdjDiceLoss(_WeightedLoss):

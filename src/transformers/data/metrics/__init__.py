@@ -16,7 +16,7 @@
 
 try:
     from scipy.stats import pearsonr, spearmanr
-    from sklearn.metrics import matthews_corrcoef, f1_score, precision_score, recall_score
+    from sklearn.metrics import matthews_corrcoef, f1_score, precision_score, recall_score, classification_report
 
     _has_sklearn = True
 except (AttributeError, ImportError):
@@ -100,6 +100,7 @@ if _has_sklearn:
         elif task_name == "hans":
             return {"acc": simple_accuracy(preds, labels)}
         elif task_name == 'twentyng':
+            classification_report(preds, labels, output_dict=False)
             return acc_and_all_f1(preds, labels) 
         else:
             raise KeyError(task_name)

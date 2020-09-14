@@ -73,6 +73,22 @@ class ModelArguments:
         default=1.0, metadata={"help": "Gamma for focal loss"}
     )
 
+    el_end: Optional[float] = field(
+        default=-1, metadata={"help": "end epoch of encourage loss "}
+    )
+
+    el_start: Optional[float] = field(
+        default=-1, metadata={"help": "start epoch of encourage loss"}
+    )
+
+    el_gamma: Optional[float] = field(
+        default=-1, metadata={"help": "el gamma"}
+    )
+
+    el_beta: Optional[float] = field(
+        default=0.999, metadata={"help": "el beta, for calculating effective num cls"}
+    )
+
 
 def main():
     # See all possible arguments in src/transformers/training_args.py
@@ -145,11 +161,15 @@ def main():
         config=config,
         cache_dir=model_args.cache_dir,
     )
-    if model_args.loss_type == 'fl': # focal_loss
+    if model_args.loss_type == 'fl':  # focal_loss
         model.set_loss_type(model_args.loss_type, {"gamma": model_args.fl_gamma})
-    elif model_args.loss_type == 'dl': # dice loss
+    elif model_args.loss_type == 'dl':  # dice loss
         model.set_loss_type(model_args.loss_type, {"gamma": model_args.dl_gamma})
-
+    elif model_args.loss_type == 'el':  # encourage loss
+        model.set_loss_type('el', {"bonus_gamma": model_args.el_gamma,
+                                   "beta": model_args.el_beta})
+    elif model_args.loss_type == 'rl':  # reweighted loss
+        model.set_loss_type('rl', {"beta": model_args.rl_beta})
     # Get datasets
     train_dataset = (
         GlueDataset(data_args, tokenizer=tokenizer, evaluate=False) #cache_dir=model_args.cache_dir) 
@@ -183,6 +203,8 @@ def main():
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         compute_metrics=build_compute_metrics_fn(data_args.task_name),
+        el_start_epoch=model_args.el_start,
+        el_end_epoch=model_args.el_end
     )
 
     # Training

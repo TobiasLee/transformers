@@ -147,6 +147,9 @@ class ModelArguments:
         default=0.0, metadata={"help": "initial increase ratio for linear schedule penalty ratio"}
     )
 
+    error_penalty: Optional[float] = field(
+        default=0.0, metadata={"help": "error penalty when making wrong prediction"}
+    )
     #
     # parser.add_argument("--replacing_rate", type=float, required=True,
     #                     help="Constant replacing rate. Also base replacing rate if using a scheduler.")
@@ -262,6 +265,11 @@ def main():
                                                               k=model_args.scheduler_linear_k)
     else:
         raise ValueError("Unsupported scheduler type: %s" % model_args.scheduler_type)
+
+    # error penalty
+    if model_args.error_penalty != 0.0:
+        logger.info("Setting error penalty to %.6f" % model_args.error_penalty)
+        model.set_error_penalty(model_args.error_penalty)
 
     scc_n_layer = model.bert.encoder.scc_n_layer
     if training_args.do_train and not model_args.switch_mode:

@@ -182,7 +182,9 @@ class Trainer:
             theseus_replace_scheduler=None,
             optimizer_grouped_parameters=None,
             logging_paths=False,
-            pr_scheduler=None
+            pr_scheduler=None,
+            el_start_epoch=-1,
+            el_end_epoch=-1,
     ):
         """
         Trainer is a simple but feature-complete training and eval loop for PyTorch,
@@ -207,6 +209,11 @@ class Trainer:
         self.theseus_replace_scheduler = theseus_replace_scheduler
         self.logging_paths = logging_paths
         self.pr_scheduler = pr_scheduler
+        self.el_start_epoch = el_start_epoch
+        self.el_end_epoch = el_end_epoch
+        if self.el_start_epoch != -1 and self.el_end_epoch != -1:
+            assert self.el_end_epoch > self.el_start_epoch, "End epoch must greater than start epoch"
+
         if tb_writer is not None:
             self.tb_writer = tb_writer
         elif is_tensorboard_available() and self.is_world_master():
@@ -471,6 +478,14 @@ class Trainer:
             epochs_trained, int(num_train_epochs), desc="Epoch", disable=not self.is_local_master()
         )
         for epoch in train_iterator:
+            if self.el_start_epoch != -1 and self.el_end_epoch != -1:  # el defer mechanism
+                if epoch < self.el_start_epoch:
+                    self.model.set_loss_type("default")  # not start el yet, use CE loss
+                elif epoch < self.el_end_epoch:
+                    self.model.set_loss_type("el")  # start el loss
+                elif epoch >= self.el_end_epoch:
+                    self.model.set_loss_type("default")  # change back to CE loss
+
             if isinstance(train_dataloader, DataLoader) and isinstance(train_dataloader.sampler, DistributedSampler):
                 train_dataloader.sampler.set_epoch(epoch)
 
