@@ -150,6 +150,10 @@ class ModelArguments:
     error_penalty: Optional[float] = field(
         default=0.0, metadata={"help": "error penalty when making wrong prediction"}
     )
+
+    bound_alpha: Optional[float] = field(
+        default=-1.0, metadata={"help": "bound alpha for adjusting the action probability"}
+    )
     #
     # parser.add_argument("--replacing_rate", type=float, required=True,
     #                     help="Constant replacing rate. Also base replacing rate if using a scheduler.")
@@ -270,6 +274,9 @@ def main():
     if model_args.error_penalty != 0.0:
         logger.info("Setting error penalty to %.6f" % model_args.error_penalty)
         model.set_error_penalty(model_args.error_penalty)
+
+    if model_args.bound_alpha != -1.0:
+        logger.info("Setting bound alpha to %.6f" % model_args.bound_alpha)
 
     scc_n_layer = model.bert.encoder.scc_n_layer
     if training_args.do_train and not model_args.switch_mode:
