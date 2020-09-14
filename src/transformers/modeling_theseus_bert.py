@@ -178,6 +178,7 @@ class BertEncoder(nn.Module):
             # early_exit_pairs = []
             early_exit_logits = ()
             early_exit_idxs = ()
+            padded_critic_actions = ()
             critic_actions = ()
 
             for i in range(self.num_parts):
@@ -194,7 +195,8 @@ class BertEncoder(nn.Module):
                     critic_action = torch.argmax(action_prob, dim=-1)
                     padded_critic_action = torch.zeros(size=(bsz,), device=device, dtype=torch.long)
                     padded_critic_action[left_idx] = critic_action
-                    critic_actions = critic_actions + (padded_critic_action,)
+                    padded_critic_actions = padded_critic_actions + (padded_critic_action,)
+                    critic_actions = critic_actions + (critic_action, )
                 else:  # during evaluation, we do not sample but using the argmax for path selection
                     action = torch.argmax(action_prob, dim=-1)
                 padded_action = torch.zeros(size=(bsz,), device=device, dtype=torch.long)
@@ -249,6 +251,7 @@ class BertEncoder(nn.Module):
                                  early_exit_logits,
                                  early_exit_idxs,
                                  internal_classifier_logits,
+                                 padded_critic_actions,
                                  critic_actions
                                  )  # action_probs for computing loss
             if self.output_hidden_states:
@@ -286,7 +289,7 @@ class BertEncoder(nn.Module):
 
                 exit_idx = left_idx[action == 0]  # using 0 for current code
                 if len(exit_idx) > 0:
-                    exited_logit = self.early_classifiers[i](hidden_states)[action == 0]
+                    exited_logit = self.early_classifiers[i](hidden_states[action == 0])
                     early_exit_logits = early_exit_logits + (exited_logit,)
                     early_exit_idxs = early_exit_idxs + (exit_idx,)
 
@@ -374,7 +377,6 @@ class BertEncoder(nn.Module):
         left_idx = torch.arange(bsz, device=device)
         large_interval = self.prd_n_layer // self.num_parts
         base_interval = self.scc_n_layer // self.num_parts
-        # early_exit_pairs = []
         early_exit_logits = ()
         early_exit_idxs = ()
 
@@ -390,7 +392,7 @@ class BertEncoder(nn.Module):
             # action: bsz,
             exit_idx = left_idx[action == 0]  # using 0 for current code
             if len(exit_idx) > 0:
-                exited_logit = self.early_classifiers[i](hidden_states)[action == 0]
+                exited_logit = self.early_classifiers[i](hidden_states[action == 0])
                 early_exit_logits = early_exit_logits + (exited_logit,)
                 early_exit_idxs = early_exit_idxs + (exit_idx,)
 
@@ -633,29 +635,44 @@ class BertForSequenceClassification(BertPreTrainedModel):
         early_exit_idx: Tuple = None
         early_exit_logit: Tuple = None
         internal_classifier_logits = None
-        critic_actions = []
+        critic_actions = ()
+        padded_critic_actions = ()
         critic_logits = None
+        critic_early_exit_idx = None
+        critic_early_exit_logit = None
         if self.bert.encoder.train_agent:
             left_idx = outputs[2]
             action_probs = outputs[3]
             actions = outputs[4]
             early_exit_logit = outputs[5]
             early_exit_idx = outputs[6]
-            critic_actions = outputs[8]
+            padded_critic_actions = outputs[8]
+            critic_actions = outputs[9]
             # internal_classifier_logits = outputs[7] # we separate internal classifier trianing
         elif self.bert.encoder.train_early_exit:
             internal_classifier_logits = outputs[-1]
 
         if self.training and len(critic_actions) > 0:  # self-critic baseline
-            outputs = self.bert(input_ids,
-                                attention_mask=attention_mask,
-                                token_type_ids=token_type_ids,
-                                position_ids=position_ids,
-                                head_mask=head_mask,
-                                inputs_embeds=inputs_embeds,
-                                critic_actions=critic_actions)
-            critic_pooled = self.dropout(pooled_output)
+            critic_outputs = self.bert(input_ids,
+                                       attention_mask=attention_mask,
+                                       token_type_ids=token_type_ids,
+                                       position_ids=position_ids,
+                                       head_mask=head_mask,
+                                       inputs_embeds=inputs_embeds,
+                                       critic_actions=critic_actions)
+            critic_pooled_output = critic_outputs[1]
+            critic_pooled = self.dropout(critic_pooled_output)
             critic_logits = self.classifier(critic_pooled)
+
+            # resemble the logits
+            critic_left_idx = critic_outputs[2]
+            critic_early_exit_logit = critic_outputs[3]
+            critic_early_exit_idx = critic_outputs[4]
+            if critic_early_exit_idx is not None and len(critic_early_exit_idx) > 0:  # if early exit happens,
+                # re-order it back
+                critic_total_idx = torch.cat(critic_early_exit_idx + (critic_left_idx,), dim=0)
+                _, critic_order = torch.sort(critic_total_idx)
+                critic_logits = torch.cat(critic_early_exit_logit + (critic_logits,), dim=0)[critic_order]
 
         pooled_output = self.dropout(pooled_output)
         logits = self.classifier(pooled_output)
@@ -709,7 +726,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
                     prob = torch.gather(path_prob, dim=-1, index=selected_path).squeeze()  # bsz
                     final_decision_prob *= prob
                     path_penalty += action  #
-                    paths.append(action.unsqueeze(1))
+                    paths.append(selected_path)
 
                 # if not self.training:
                 # we can add an expected saving computation here
@@ -722,7 +739,8 @@ class BertForSequenceClassification(BertPreTrainedModel):
                     performance_reward = - entropy_reward_fct(logits.view(-1, self.num_labels), labels.view(-1))
                     reward = self.get_reward(logits, labels, paths, self.error_penalty)
                     if critic_logits is not None:
-                        baseline = self.get_reward(critic_logits, labels, critic_actions, self.error_penalty)
+                        padded_critic_paths = [critic_action.unsqueeze(1) for critic_action in padded_critic_actions]
+                        baseline = self.get_reward(critic_logits, labels, padded_critic_paths, self.error_penalty)
                         reward = reward - baseline  # minus self-critic baseline
                 else:
                     raise ValueError("Current the regression is not supported")
