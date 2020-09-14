@@ -369,7 +369,7 @@ class BertEncoder(nn.Module):
             outputs = outputs + (all_attentions,)
         return outputs  # last-layer hidden state, (all hidden states), (all attentions)
 
-    def critic_forward(self, hidden_states, critic_actions, attention_mask=None, head_mask=None,
+    def critic_forward(self, hidden_states, attention_mask=None, head_mask=None,
                        encoder_hidden_states=None,
                        encoder_attention_mask=None):
         bsz = hidden_states.size()[0]
@@ -388,7 +388,9 @@ class BertEncoder(nn.Module):
             return layer_hidden_states, layer_output
 
         # critic_actions: bsz, num_parts( num_parts can be small than config since examples can exit early)
-        for i, action in enumerate(critic_actions):
+        for i in enumerate(self.num_parts):
+            action_prob = self.agent(hidden_states)
+            action = torch.argmax(action_prob, dim=-1)
             # action: bsz,
             exit_idx = left_idx[action == 0]  # using 0 for current code
             if len(exit_idx) > 0:
@@ -658,8 +660,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
                                        token_type_ids=token_type_ids,
                                        position_ids=position_ids,
                                        head_mask=head_mask,
-                                       inputs_embeds=inputs_embeds,
-                                       critic_actions=critic_actions)
+                                       inputs_embeds=inputs_embeds)
             critic_pooled_output = critic_outputs[1]
             critic_pooled = self.dropout(critic_pooled_output)
             critic_logits = self.classifier(critic_pooled)
