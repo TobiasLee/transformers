@@ -178,6 +178,7 @@ class BertEncoder(nn.Module):
             # early_exit_pairs = []
             early_exit_logits = ()
             early_exit_idxs = ()
+            critic_actions = ()
 
             for i in range(self.num_parts):
                 if len(hidden_states) == 0:
@@ -190,6 +191,10 @@ class BertEncoder(nn.Module):
                 if self.training:
                     m = Categorical(action_prob)
                     action = m.sample()
+                    critic_action = torch.argmax(action_prob, dim=-1)
+                    padded_critic_action = torch.zeros(size=(bsz,), device=device, dtype=torch.long)
+                    padded_critic_action[left_idx] = critic_action
+                    critic_actions = critic_actions + (padded_critic_action,)
                 else:  # during evaluation, we do not sample but using the argmax for path selection
                     action = torch.argmax(action_prob, dim=-1)
                 padded_action = torch.zeros(size=(bsz,), device=device, dtype=torch.long)
@@ -237,23 +242,6 @@ class BertEncoder(nn.Module):
                     all_attentions = all_attentions + ((base_outputs[1], large_outputs[1]),)
 
             outputs = (hidden_states,)
-            # stack results for fp 16
-            # stacked_probs = torch.cat([p.unsqueeze(0) for p in action_probs], dim=0)  # num_parts, bsz, actio_space
-            # stacked_action = torch.cat([a.unsqueeze(0) for a in actions])  # num_parts, bsz,
-            # if len(early_exit_pairs) > 0:
-            #     early_exit_logit = torch.cat([p[0] for p in early_exit_pairs], dim=0)  # num_exited,  num_labels
-            #     early_exit_idx = torch.cat([p[1] for p in early_exit_pairs], dim=0)  # num_exited,
-            # else:
-            #     early_exit_logit = torch.zeros((0, self.config.num_labels), device=device)
-            #     early_exit_idx = torch.zeros((0,), dtype=torch.long, device=device)  # create zero tensor for multi-gpu
-
-            # if len(internal_classifier_logits) > 0:
-            #     stacked_internal_classifier_logits = torch.cat(
-            #         [logit.unsqueeze(0) for logit in internal_classifier_logits],
-            #         dim=0)  # num_parts, bsz, num_labels
-            # else:
-            #     stacked_internal_classifier_logits = torch.zeros((self.num_parts, bsz, self.config.num_labels),
-            #                                                      device=device)  # create zero tensor for multi-gpu
 
             outputs = outputs + (left_idx,
                                  action_probs,
@@ -261,6 +249,7 @@ class BertEncoder(nn.Module):
                                  early_exit_logits,
                                  early_exit_idxs,
                                  internal_classifier_logits,
+                                 critic_actions
                                  )  # action_probs for computing loss
             if self.output_hidden_states:
                 outputs = outputs + (all_hidden_states,)
@@ -377,6 +366,71 @@ class BertEncoder(nn.Module):
             outputs = outputs + (all_attentions,)
         return outputs  # last-layer hidden state, (all hidden states), (all attentions)
 
+    def critic_forward(self, hidden_states, critic_actions, attention_mask=None, head_mask=None,
+                       encoder_hidden_states=None,
+                       encoder_attention_mask=None):
+        bsz = hidden_states.size()[0]
+        device = hidden_states.device
+        left_idx = torch.arange(bsz, device=device)
+        large_interval = self.prd_n_layer // self.num_parts
+        base_interval = self.scc_n_layer // self.num_parts
+        # early_exit_pairs = []
+        early_exit_logits = ()
+        early_exit_idxs = ()
+
+        def _run_sub_blocks(layer_hidden_states, layers, idx):
+            for i, layer in enumerate(layers):
+                layer_output = layer(layer_hidden_states, attention_mask[idx], None, encoder_hidden_states,
+                                     encoder_attention_mask[idx] if encoder_attention_mask is not None else None)
+                layer_hidden_states = layer_output[0]
+            return layer_hidden_states, layer_output
+
+        # critic_actions: bsz, num_parts( num_parts can be small than config since examples can exit early)
+        for i, action in enumerate(critic_actions):
+            # action: bsz,
+            exit_idx = left_idx[action == 0]  # using 0 for current code
+            if len(exit_idx) > 0:
+                exited_logit = self.early_classifiers[i](hidden_states)[action == 0]
+                early_exit_logits = early_exit_logits + (exited_logit,)
+                early_exit_idxs = early_exit_idxs + (exit_idx,)
+
+            #  to implement acceleration, exited examples are not supposed to continue the forward loop
+            base_idx = left_idx[action == 1]
+            large_idx = left_idx[action == 2]
+            base_input = hidden_states[action == 1]
+            large_input = hidden_states[action == 2]
+
+            base_hiddens = base_input
+            large_hiddens = large_input
+
+            if len(base_input) > 0:
+                base_hiddens, base_outputs = _run_sub_blocks(base_input,
+                                                             self.scc_layer[
+                                                             i * base_interval:i * base_interval + base_interval],
+                                                             base_idx)
+            if len(large_input) > 0:
+                large_hiddens, large_outputs = _run_sub_blocks(large_input, self.layer[
+                                                                            i * large_interval:i * large_interval + large_interval],
+                                                               large_idx)
+
+            if len(base_input) == 0:
+                hidden_states = large_hiddens
+            elif len(large_input) == 0:
+                hidden_states = base_hiddens
+            else:
+                hidden_states = torch.cat((base_hiddens, large_hiddens), dim=0)
+            sorted_idx, order = torch.sort(torch.cat((base_idx, large_idx), dim=0))
+            left_idx = sorted_idx
+            hidden_states = hidden_states[order]  # order left hidden it back
+        outputs = (hidden_states,)
+
+        # critic forward return results
+        outputs = outputs + (left_idx,
+                             early_exit_logits,
+                             early_exit_idxs,
+                             )
+        return outputs
+
 
 class LinearPenaltyRatioScheduler:
     def __init__(self, model, initial_penalty_ratio, linear_k, max_penalty_ratio):
@@ -477,7 +531,8 @@ class BertModel(BertPreTrainedModel):
             self.encoder.layer[layer].attention.prune_heads(heads)
 
     def forward(self, input_ids=None, attention_mask=None, token_type_ids=None, position_ids=None,
-                head_mask=None, inputs_embeds=None, encoder_hidden_states=None, encoder_attention_mask=None):
+                head_mask=None, inputs_embeds=None, encoder_hidden_states=None, encoder_attention_mask=None,
+                critic_actions=None):
         if input_ids is not None and inputs_embeds is not None:
             raise ValueError("You cannot specify both input_ids and inputs_embeds at the same time")
         elif input_ids is not None:
@@ -514,11 +569,19 @@ class BertModel(BertPreTrainedModel):
 
         embedding_output = self.embeddings(input_ids=input_ids, position_ids=position_ids,
                                            token_type_ids=token_type_ids, inputs_embeds=inputs_embeds)
-        encoder_outputs = self.encoder(embedding_output,
-                                       attention_mask=extended_attention_mask,
-                                       head_mask=head_mask,
-                                       encoder_hidden_states=encoder_hidden_states,
-                                       encoder_attention_mask=encoder_extended_attention_mask)
+        if critic_actions is None:
+            encoder_outputs = self.encoder(embedding_output,
+                                           attention_mask=extended_attention_mask,
+                                           head_mask=head_mask,
+                                           encoder_hidden_states=encoder_hidden_states,
+                                           encoder_attention_mask=encoder_extended_attention_mask)
+        else:
+            encoder_outputs = self.encoder.critic_forward(embedding_output,
+                                                          attention_mask=extended_attention_mask,
+                                                          head_mask=head_mask,
+                                                          encoder_hidden_states=encoder_hidden_states,
+                                                          encoder_attention_mask=encoder_extended_attention_mask,
+                                                          critic_actions=critic_actions)
         sequence_output = encoder_outputs[0]
         pooled_output = self.pooler(sequence_output)
 
@@ -528,7 +591,7 @@ class BertModel(BertPreTrainedModel):
 
 
 class BertForSequenceClassification(BertPreTrainedModel):
-    def __init__(self, config):
+    def __init__(self, config, error_penalty=0.0):
         super(BertForSequenceClassification, self).__init__(config)
         self.num_labels = config.num_labels
 
@@ -539,12 +602,16 @@ class BertForSequenceClassification(BertPreTrainedModel):
         self.init_weights()
         self.path_penalty_ratio = 0.0
         self.use_baseline = False
+        self.error_penalty = error_penalty
 
     def set_switch_pattern(self, switch_pattern):
         self.bert.encoder.switch_pattern = switch_pattern
 
     def set_path_penalty(self, penalty_ratio):
         self.path_penalty_ratio = penalty_ratio
+
+    def set_error_penalty(self, error_penalty):
+        self.error_penalty = error_penalty
 
     def set_baseline(self):
         self.use_baseline = True
@@ -566,15 +633,29 @@ class BertForSequenceClassification(BertPreTrainedModel):
         early_exit_idx: Tuple = None
         early_exit_logit: Tuple = None
         internal_classifier_logits = None
+        critic_actions = []
+        critic_logits = None
         if self.bert.encoder.train_agent:
             left_idx = outputs[2]
             action_probs = outputs[3]
             actions = outputs[4]
             early_exit_logit = outputs[5]
             early_exit_idx = outputs[6]
+            critic_actions = outputs[8]
             # internal_classifier_logits = outputs[7] # we separate internal classifier trianing
         elif self.bert.encoder.train_early_exit:
             internal_classifier_logits = outputs[-1]
+
+        if self.training and len(critic_actions) > 0:  # self-critic baseline
+            outputs = self.bert(input_ids,
+                                attention_mask=attention_mask,
+                                token_type_ids=token_type_ids,
+                                position_ids=position_ids,
+                                head_mask=head_mask,
+                                inputs_embeds=inputs_embeds,
+                                critic_actions=critic_actions)
+            critic_pooled = self.dropout(pooled_output)
+            critic_logits = self.classifier(critic_pooled)
 
         pooled_output = self.dropout(pooled_output)
         logits = self.classifier(pooled_output)
@@ -630,48 +711,55 @@ class BertForSequenceClassification(BertPreTrainedModel):
                     path_penalty += action  #
                     paths.append(action.unsqueeze(1))
 
-                    # padded_prob = torch.ones((bsz,), device=input_ids.device)
-                    # padded_prob[action_idx] = prob
-                    # final_decision_prob *= padded_prob  # final prob
-                    # padded_path = torch.zeros((bsz,), device=input_ids.device, dtype=torch.long)
-                    # padded_path[action_idx] = action
-                    # path_penalty += padded_path  # add large block prob as penalty
-                    # paths.append(padded_path.unsqueeze(1))
-
-                if not self.training:
-                    paths = torch.cat(paths, dim=-1)  # bsz, num_parts
-                    # we can add an expected saving computation here
-                    # print("Layer ratio: %.3f%%" % (
-                    #         (torch.sum(paths) / torch.sum(all_large, dtype=torch.float)).item() * 100))
-                    # print(paths[:4])  # sample for some path
+                # if not self.training:
+                # we can add an expected saving computation here
+                # print("Layer ratio: %.3f%%" % (
+                #         (torch.sum(paths) / torch.sum(all_large, dtype=torch.float)).item() * 100))
+                # print(paths[:4])  # sample for some path
 
                 if self.num_labels != 1:
-                    # entropy_reward_fct = CrossEntropyLoss(reduction='none')
-                    # performance_reward = - entropy_reward_fct(logits.view(-1, self.num_labels), labels.view(-1))
-                    predicted_labels = torch.argmax(logits, dim=-1)  # bsz
-                    performance_reward = - predicted_labels.eq(labels).type_as(logits)
+                    entropy_reward_fct = CrossEntropyLoss(reduction='none')
+                    performance_reward = - entropy_reward_fct(logits.view(-1, self.num_labels), labels.view(-1))
+                    reward = self.get_reward(logits, labels, paths, self.error_penalty)
+                    if critic_logits is not None:
+                        baseline = self.get_reward(critic_logits, labels, critic_actions, self.error_penalty)
+                        reward = reward - baseline  # minus self-critic baseline
                 else:
-                    mse_reward_fct = MSELoss(reduction='none')
-                    performance_reward = - mse_reward_fct(logits.view(-1), labels.view(-1))
-                if self.use_baseline:
-                    path_penalty = path_penalty - torch.mean(path_penalty)
-                penalty_reward = - self.path_penalty_ratio * path_penalty
-                reward = performance_reward + penalty_reward
+                    raise ValueError("Current the regression is not supported")
+                    # mse_reward_fct = MSELoss(reduction='none')
+                    # performance_reward = - mse_reward_fct(logits.view(-1), labels.view(-1))
+                # if self.use_baseline:
+                #     path_penalty = path_penalty - torch.mean(path_penalty)
+                #
+                penalty_reward = - path_penalty
+                # reward = performance_reward + penalty_reward
                 # if self.use_baseline:
                 #    reward = reward - torch.mean(reward)  # minus baseline
-                reward = torch.mean(reward *
+                loss = - torch.mean(reward *
                                     torch.log(final_decision_prob + 1e-9))  # sum over bsz
                 # if self.training:
                 #     loss = loss + internal_loss - reward
                 # else:
                 # decouple early exit training & agent training
-                loss = - reward
+                # loss = - reward
                 outputs = outputs + (
-                    final_decision_prob, torch.mean(penalty_reward), torch.mean(performance_reward), paths,)
+                    final_decision_prob, torch.mean(penalty_reward),
+                    torch.mean(performance_reward), paths,)
                 # minus reward + penalty
             outputs = (loss,) + outputs
 
         return outputs  # (loss), logits, (hidden_states), (attentions)
+
+    def get_reward(self, logits, labels, paths, error_penalty=-0.1):
+        assert self.num_labels != 1
+        predicted_labels = torch.argmax(logits, dim=-1)  # bsz
+        correct_labels = - predicted_labels.eq(labels)  #
+        paths = torch.cat(paths, dim=-1)  # bsz, num_parts
+        expected_saving = paths.sum(dim=1).type_as(logits) / (self.bert.encoder.num_parts * 2)
+        sparse_reward = 1 - expected_saving ** 2
+        error_penalty = torch.ones_like(expected_saving) * error_penalty
+        reward = torch.where(correct_labels, sparse_reward, error_penalty)
+        return reward
 
 
 class BertForMultipleChoice(BertPreTrainedModel):
