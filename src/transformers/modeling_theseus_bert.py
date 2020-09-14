@@ -638,27 +638,28 @@ class BertForSequenceClassification(BertPreTrainedModel):
                     # path_penalty += padded_path  # add large block prob as penalty
                     # paths.append(padded_path.unsqueeze(1))
 
-                if not self.training:
-                    paths = torch.cat(paths, dim=-1)  # bsz, num_parts
+                #if not self.training:
+                paths = torch.cat(paths, dim=-1)  # bsz, num_parts
                     # we can add an expected saving computation here
                     # print("Layer ratio: %.3f%%" % (
                     #         (torch.sum(paths) / torch.sum(all_large, dtype=torch.float)).item() * 100))
-                    print(paths[:4])  # sample for some path
+                print(paths[:4])  # sample for some path
 
                 if self.num_labels != 1:
                     # entropy_reward_fct = CrossEntropyLoss(reduction='none')
                     # performance_reward = - entropy_reward_fct(logits.view(-1, self.num_labels), labels.view(-1))
                     predicted_labels = torch.argmax(logits, dim=-1)  # bsz
                     performance_reward = - predicted_labels.eq(labels).type_as(logits)
+                    # print(performance_reward)
                 else:
                     mse_reward_fct = MSELoss(reduction='none')
                     performance_reward = - mse_reward_fct(logits.view(-1), labels.view(-1))
-                if self.use_baseline:
-                    path_penalty = path_penalty - torch.mean(path_penalty)
+                #if self.use_baseline:
+                #    path_penalty = path_penalty - torch.mean(path_penalty)
                 penalty_reward = - self.path_penalty_ratio * path_penalty
                 reward = performance_reward + penalty_reward
-                # if self.use_baseline:
-                #    reward = reward - torch.mean(reward)  # minus baseline
+                if self.use_baseline:
+                    reward = reward - torch.mean(reward)  # minus baseline
                 reward = torch.mean(reward *
                                     torch.log(final_decision_prob + 1e-9))  # sum over bsz
                 # if self.training:
