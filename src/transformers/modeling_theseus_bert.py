@@ -724,6 +724,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
                     path_penalty += action  #
                     paths.append(selected_path)
 
+                paths = torch.cat(paths, dim=-1)
                 # if not self.training:
                 # we can add an expected saving computation here
                 # print("Layer ratio: %.3f%%" % (
@@ -735,7 +736,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
                     performance_reward = - entropy_reward_fct(logits.view(-1, self.num_labels), labels.view(-1))
                     reward = self.get_reward(logits, labels, paths, self.error_penalty)
                     if critic_logits is not None:
-                        padded_critic_paths = [critic_action.unsqueeze(1) for critic_action in padded_critic_actions]
+                        padded_critic_paths = torch.cat([critic_action.unsqueeze(1) for critic_action in padded_critic_actions], dim=-1)
                         baseline = self.get_reward(critic_logits, labels, padded_critic_paths, self.error_penalty)
                         reward = reward - baseline  # minus self-critic baseline
                 else:
@@ -756,6 +757,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
                 # else:
                 # decouple early exit training & agent training
                 # loss = - reward
+
                 outputs = outputs + (
                     final_decision_prob, torch.mean(penalty_reward),
                     torch.mean(performance_reward), paths,)
@@ -767,11 +769,11 @@ class BertForSequenceClassification(BertPreTrainedModel):
     def get_reward(self, logits, labels, paths, error_penalty=-0.1):
         assert self.num_labels != 1
         predicted_labels = torch.argmax(logits, dim=-1)  # bsz
-        correct_labels = - predicted_labels.eq(labels)  #
-        paths = torch.cat(paths, dim=-1)  # bsz, num_parts
+        correct_labels = predicted_labels.eq(labels)  #
+        # paths = torch.cat(paths, dim=-1)  # bsz, num_parts
         expected_saving = paths.sum(dim=1).type_as(logits) / (self.bert.encoder.num_parts * 2)
-        sparse_reward = 1 - expected_saving ** 2
-        error_penalty = torch.ones_like(expected_saving) * error_penalty
+        sparse_reward = 1 - torch.pow(expected_saving, 2)
+        error_penalty = torch.ones_like(sparse_reward) * error_penalty
         reward = torch.where(correct_labels, sparse_reward, error_penalty)
         return reward
 
