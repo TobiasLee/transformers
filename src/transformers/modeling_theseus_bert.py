@@ -66,7 +66,8 @@ class BertEncoder(nn.Module):
                  train_agent=False, n_action_space=3,
                  train_early_exit=False,
                  early_exit_idx=-1,
-                 only_large_and_exit=False):
+                 only_large_and_exit=False,
+                 bound_alpha=-1.0):
         super(BertEncoder, self).__init__()
         self.prd_n_layer = config.num_hidden_layers
         self.scc_n_layer = scc_n_layer
@@ -89,11 +90,15 @@ class BertEncoder(nn.Module):
         self.train_early_exit = train_early_exit
         self.early_exit_idx = early_exit_idx
         self.only_large_and_exit = only_large_and_exit
+        self.bound_alpha = bound_alpha
 
     def set_replacing_rate(self, replacing_rate):
         if not 0 < replacing_rate <= 1:
             raise Exception('Replace rate must be in the range (0, 1]!')
         self.bernoulli = Bernoulli(torch.tensor([replacing_rate]))
+
+    def set_bound_alpha(self, alpha):
+        self.bound_alpha = alpha
 
     def init_highway_pooler(self, pooler):
         # 实际上在 copy 最后一层 pooler
@@ -183,6 +188,8 @@ class BertEncoder(nn.Module):
                 if len(hidden_states) == 0:
                     break
                 action_prob = self.agent(hidden_states)
+                if self.bound_alpha > 0:
+                    action_prob = self.adjust_prob(action_prob)  # adjust prob distribution according to alpha
                 padded_prob = torch.ones((bsz, self.agent.action_classifier.out_features), device=device)
                 padded_prob[left_idx] = action_prob
                 action_probs = action_probs + (padded_prob,)
@@ -385,7 +392,7 @@ class BertEncoder(nn.Module):
             action = torch.argmax(action_prob, dim=-1)
             padded_action = torch.zeros((bsz,), device=device, dtype=torch.long)
             padded_action[left_idx] = action
-            actions = actions + (padded_action, )
+            actions = actions + (padded_action,)
             # action: bsz,
             exit_idx = left_idx[action == 0]  # using 0 for current code
             if len(exit_idx) > 0:
@@ -430,6 +437,11 @@ class BertEncoder(nn.Module):
                              actions
                              )
         return outputs
+
+    def adjust_prob(self, prob):
+        #  adjust prob to avoid extreme exploitation
+        adjusted_prob = prob * self.bound_alpha + (1 - self.bound_alpha) * (1 - prob)
+        return adjusted_prob
 
 
 class LinearPenaltyRatioScheduler:
