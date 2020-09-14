@@ -178,8 +178,6 @@ class BertEncoder(nn.Module):
             # early_exit_pairs = []
             early_exit_logits = ()
             early_exit_idxs = ()
-            padded_critic_actions = ()
-            critic_actions = ()
 
             for i in range(self.num_parts):
                 if len(hidden_states) == 0:
@@ -192,11 +190,6 @@ class BertEncoder(nn.Module):
                 if self.training:
                     m = Categorical(action_prob)
                     action = m.sample()
-                    critic_action = torch.argmax(action_prob, dim=-1)
-                    padded_critic_action = torch.zeros(size=(bsz,), device=device, dtype=torch.long)
-                    padded_critic_action[left_idx] = critic_action
-                    padded_critic_actions = padded_critic_actions + (padded_critic_action,)
-                    critic_actions = critic_actions + (critic_action, )
                 else:  # during evaluation, we do not sample but using the argmax for path selection
                     action = torch.argmax(action_prob, dim=-1)
                 padded_action = torch.zeros(size=(bsz,), device=device, dtype=torch.long)
@@ -250,9 +243,7 @@ class BertEncoder(nn.Module):
                                  actions,
                                  early_exit_logits,
                                  early_exit_idxs,
-                                 internal_classifier_logits,
-                                 padded_critic_actions,
-                                 critic_actions
+                                 internal_classifier_logits
                                  )  # action_probs for computing loss
             if self.output_hidden_states:
                 outputs = outputs + (all_hidden_states,)
@@ -379,6 +370,7 @@ class BertEncoder(nn.Module):
         base_interval = self.scc_n_layer // self.num_parts
         early_exit_logits = ()
         early_exit_idxs = ()
+        actions = ()
 
         def _run_sub_blocks(layer_hidden_states, layers, idx):
             for i, layer in enumerate(layers):
@@ -391,6 +383,9 @@ class BertEncoder(nn.Module):
         for i in enumerate(self.num_parts):
             action_prob = self.agent(hidden_states)
             action = torch.argmax(action_prob, dim=-1)
+            padded_action = torch.zeros((bsz,), device=device, dtype=torch.long)
+            padded_action[left_idx] = action
+            actions = actions + (padded_action, )
             # action: bsz,
             exit_idx = left_idx[action == 0]  # using 0 for current code
             if len(exit_idx) > 0:
@@ -432,6 +427,7 @@ class BertEncoder(nn.Module):
         outputs = outputs + (left_idx,
                              early_exit_logits,
                              early_exit_idxs,
+                             actions
                              )
         return outputs
 
@@ -536,7 +532,7 @@ class BertModel(BertPreTrainedModel):
 
     def forward(self, input_ids=None, attention_mask=None, token_type_ids=None, position_ids=None,
                 head_mask=None, inputs_embeds=None, encoder_hidden_states=None, encoder_attention_mask=None,
-                critic_actions=None):
+                critic_forward=False):
         if input_ids is not None and inputs_embeds is not None:
             raise ValueError("You cannot specify both input_ids and inputs_embeds at the same time")
         elif input_ids is not None:
@@ -573,7 +569,7 @@ class BertModel(BertPreTrainedModel):
 
         embedding_output = self.embeddings(input_ids=input_ids, position_ids=position_ids,
                                            token_type_ids=token_type_ids, inputs_embeds=inputs_embeds)
-        if critic_actions is None:
+        if not critic_forward:
             encoder_outputs = self.encoder(embedding_output,
                                            attention_mask=extended_attention_mask,
                                            head_mask=head_mask,
@@ -584,8 +580,7 @@ class BertModel(BertPreTrainedModel):
                                                           attention_mask=extended_attention_mask,
                                                           head_mask=head_mask,
                                                           encoder_hidden_states=encoder_hidden_states,
-                                                          encoder_attention_mask=encoder_extended_attention_mask,
-                                                          critic_actions=critic_actions)
+                                                          encoder_attention_mask=encoder_extended_attention_mask)
         sequence_output = encoder_outputs[0]
         pooled_output = self.pooler(sequence_output)
 
@@ -648,14 +643,13 @@ class BertForSequenceClassification(BertPreTrainedModel):
             actions = outputs[4]
             early_exit_logit = outputs[5]
             early_exit_idx = outputs[6]
-            padded_critic_actions = outputs[8]
-            critic_actions = outputs[9]
             # internal_classifier_logits = outputs[7] # we separate internal classifier trianing
         elif self.bert.encoder.train_early_exit:
             internal_classifier_logits = outputs[-1]
 
         if self.training and len(critic_actions) > 0:  # self-critic baseline
             critic_outputs = self.bert(input_ids,
+                                       critic_forward=True,
                                        attention_mask=attention_mask,
                                        token_type_ids=token_type_ids,
                                        position_ids=position_ids,
@@ -674,6 +668,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
                 critic_total_idx = torch.cat(critic_early_exit_idx + (critic_left_idx,), dim=0)
                 _, critic_order = torch.sort(critic_total_idx)
                 critic_logits = torch.cat(critic_early_exit_logit + (critic_logits,), dim=0)[critic_order]
+            padded_critic_actions = critic_outputs[5]
 
         pooled_output = self.dropout(pooled_output)
         logits = self.classifier(pooled_output)
