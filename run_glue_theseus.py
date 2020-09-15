@@ -277,6 +277,7 @@ def main():
 
     if model_args.bound_alpha != -1.0:
         logger.info("Setting bound alpha to %.6f" % model_args.bound_alpha)
+        model.bert.encoder.bound_alpha = model_args.bound_alpha
 
     scc_n_layer = model.bert.encoder.scc_n_layer
     if training_args.do_train and not model_args.switch_mode:
