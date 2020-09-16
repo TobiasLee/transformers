@@ -91,6 +91,7 @@ class BertEncoder(nn.Module):
         self.early_exit_idx = early_exit_idx
         self.only_large_and_exit = only_large_and_exit
         self.bound_alpha = bound_alpha
+        self.cl_idx = -1
 
     def set_replacing_rate(self, replacing_rate):
         if not 0 < replacing_rate <= 1:
@@ -99,6 +100,10 @@ class BertEncoder(nn.Module):
 
     def set_bound_alpha(self, alpha):
         self.bound_alpha = alpha
+
+    def set_cl_idx(self, index):
+        """how many num blocks is defined to use large blocks, ranges from [1, num_parts]"""
+        self.cl_idx = index
 
     def init_highway_pooler(self, pooler):
         # 实际上在 copy 最后一层 pooler
@@ -200,6 +205,12 @@ class BertEncoder(nn.Module):
                 else:  # during evaluation, we do not sample but using the argmax for path selection
                     action = torch.argmax(action_prob, dim=-1)
                 padded_action = torch.zeros(size=(bsz,), device=device, dtype=torch.long)
+
+                # curriculum learning
+                if i < self.cl_idx and self.training:
+                    action = torch.ones_like(action) * 2
+                    padded_action[left_idx] = action
+
                 padded_action[left_idx] = action
                 actions = actions + (padded_action,)
                 exit_idx = left_idx[action == 0]  # using 0 for current code
@@ -391,6 +402,11 @@ class BertEncoder(nn.Module):
             action_prob = self.agent(hidden_states)
             action = torch.argmax(action_prob, dim=-1)
             padded_action = torch.zeros((bsz,), device=device, dtype=torch.long)
+
+            # curriculum learning
+            if i < self.cl_idx and self.training:
+                action = torch.ones_like(action) * 2
+
             padded_action[left_idx] = action
             actions = actions + (padded_action,)
             # action: bsz,
@@ -602,7 +618,7 @@ class BertModel(BertPreTrainedModel):
 
 
 class BertForSequenceClassification(BertPreTrainedModel):
-    def __init__(self, config, error_penalty=0.0):
+    def __init__(self, config):
         super(BertForSequenceClassification, self).__init__(config)
         self.num_labels = config.num_labels
 
@@ -613,7 +629,8 @@ class BertForSequenceClassification(BertPreTrainedModel):
         self.init_weights()
         self.path_penalty_ratio = 0.0
         self.use_baseline = False
-        self.error_penalty = error_penalty
+        self.error_penalty = 0.0
+        self.entropy_beta = 0.0
 
     def set_switch_pattern(self, switch_pattern):
         self.bert.encoder.switch_pattern = switch_pattern
@@ -623,6 +640,9 @@ class BertForSequenceClassification(BertPreTrainedModel):
 
     def set_error_penalty(self, error_penalty):
         self.error_penalty = error_penalty
+
+    def set_entropy_beta(self, entropy_beta):
+        self.entropy_beta = entropy_beta
 
     def set_baseline(self):
         self.use_baseline = True
@@ -729,9 +749,12 @@ class BertForSequenceClassification(BertPreTrainedModel):
                 bsz = logits.size()[0]
                 final_decision_prob = torch.ones((bsz,), device=input_ids.device)
                 path_penalty = torch.zeros((bsz,), device=input_ids.device)
-                for path_prob, action in zip(action_probs, actions):
+                for i, (path_prob, action) in enumerate(zip(action_probs, actions)):
                     selected_path = action.unsqueeze(1)  # bsz, 1
-                    prob = torch.gather(path_prob, dim=-1, index=selected_path).squeeze()  # bsz
+                    if i < self.bert.encoder.cl_idx and self.training:
+                        prob = torch.ones_like(final_decision_prob)  # directly set the path probability to 1
+                    else:
+                        prob = torch.gather(path_prob, dim=-1, index=selected_path).squeeze()  # bsz
                     final_decision_prob *= prob
                     path_penalty += action  #
                     paths.append(selected_path)
@@ -748,7 +771,8 @@ class BertForSequenceClassification(BertPreTrainedModel):
                     performance_reward = - entropy_reward_fct(logits.view(-1, self.num_labels), labels.view(-1))
                     reward = self.get_reward(logits, labels, paths, self.error_penalty)
                     if critic_logits is not None:
-                        padded_critic_paths = torch.cat([critic_action.unsqueeze(1) for critic_action in padded_critic_actions], dim=-1)
+                        padded_critic_paths = torch.cat(
+                            [critic_action.unsqueeze(1) for critic_action in padded_critic_actions], dim=-1)
                         baseline = self.get_reward(critic_logits, labels, padded_critic_paths, self.error_penalty)
                         reward = reward - baseline  # minus self-critic baseline
                 else:
@@ -762,8 +786,14 @@ class BertForSequenceClassification(BertPreTrainedModel):
                 # reward = performance_reward + penalty_reward
                 # if self.use_baseline:
                 #    reward = reward - torch.mean(reward)  # minus baseline
-                loss = - torch.mean(reward *
-                                    torch.log(final_decision_prob + 1e-9))  # sum over bsz
+                final_decision_prob = final_decision_prob.clamp(1e-9, 1 - 1e-9)
+                loss = - reward * torch.log(final_decision_prob)  # sum over bsz
+
+                # entropy loss
+                # entropy_loss = - final_decision_prob * torch.log(final_decision_prob)
+                # loss = loss - self.entropy_beta * entropy_loss  # minus action entropy
+
+                loss = loss.mean()
                 # if self.training:
                 #     loss = loss + internal_loss - reward
                 # else:

@@ -154,6 +154,10 @@ class ModelArguments:
     bound_alpha: Optional[float] = field(
         default=-1.0, metadata={"help": "bound alpha for adjusting the action probability"}
     )
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     00000000000000000000000000000==`=``````
+    cl_idx: Optional[int] = field(
+        default=-1, metadata={"help": "curriculum learning idx, denotes how many layer is set to large directly"}
+    )
     #
     # parser.add_argument("--replacing_rate", type=float, required=True,
     #                     help="Constant replacing rate. Also base replacing rate if using a scheduler.")
@@ -278,6 +282,10 @@ def main():
     if model_args.bound_alpha != -1.0:
         logger.info("Setting bound alpha to %.6f" % model_args.bound_alpha)
         model.bert.encoder.bound_alpha = model_args.bound_alpha
+
+    if model_args.cl_idx != -1:
+        logger.info("Setting curriculum  learning idx to %d" % model_args.cl_idx)
+        model.bert.encoder.cl_idx = model_args.cl_idx
 
     scc_n_layer = model.bert.encoder.scc_n_layer
     if training_args.do_train and not model_args.switch_mode:
