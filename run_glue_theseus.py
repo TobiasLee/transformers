@@ -154,7 +154,7 @@ class ModelArguments:
     bound_alpha: Optional[float] = field(
         default=-1.0, metadata={"help": "bound alpha for adjusting the action probability"}
     )
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     00000000000000000000000000000==`=``````
+    
     cl_idx: Optional[int] = field(
         default=-1, metadata={"help": "curriculum learning idx, denotes how many layer is set to large directly"}
     )

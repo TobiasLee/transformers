@@ -207,7 +207,7 @@ class BertEncoder(nn.Module):
                 padded_action = torch.zeros(size=(bsz,), device=device, dtype=torch.long)
 
                 # curriculum learning
-                if i < self.cl_idx and self.training:
+                if i < self.cl_idx: #  and self.training:
                     action = torch.ones_like(action) * 2
                     padded_action[left_idx] = action
 
@@ -404,7 +404,7 @@ class BertEncoder(nn.Module):
             padded_action = torch.zeros((bsz,), device=device, dtype=torch.long)
 
             # curriculum learning
-            if i < self.cl_idx and self.training:
+            if i < self.cl_idx: # and self.training:
                 action = torch.ones_like(action) * 2
 
             padded_action[left_idx] = action
@@ -751,7 +751,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
                 path_penalty = torch.zeros((bsz,), device=input_ids.device)
                 for i, (path_prob, action) in enumerate(zip(action_probs, actions)):
                     selected_path = action.unsqueeze(1)  # bsz, 1
-                    if i < self.bert.encoder.cl_idx and self.training:
+                    if i < self.bert.encoder.cl_idx:  #and self.training:
                         prob = torch.ones_like(final_decision_prob)  # directly set the path probability to 1
                     else:
                         prob = torch.gather(path_prob, dim=-1, index=selected_path).squeeze()  # bsz
