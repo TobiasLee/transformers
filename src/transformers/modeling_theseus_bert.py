@@ -631,6 +631,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
         self.use_baseline = False
         self.error_penalty = 0.0
         self.entropy_beta = 0.0
+        self.global_step = 0
 
     def set_switch_pattern(self, switch_pattern):
         self.bert.encoder.switch_pattern = switch_pattern
@@ -701,6 +702,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
                 _, critic_order = torch.sort(critic_total_idx)
                 critic_logits = torch.cat(critic_early_exit_logit + (critic_logits,), dim=0)[critic_order]
             padded_critic_actions = critic_outputs[5]
+            self.global_step += 1
 
         pooled_output = self.dropout(pooled_output)
         logits = self.classifier(pooled_output)
@@ -751,7 +753,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
                 path_penalty = torch.zeros((bsz,), device=input_ids.device)
                 for i, (path_prob, action) in enumerate(zip(action_probs, actions)):
                     selected_path = action.unsqueeze(1)  # bsz, 1
-                    if i < self.bert.encoder.cl_idx:  #and self.training:
+                    if i < self.bert.encoder.cl_idx:  # and self.training:
                         prob = torch.ones_like(final_decision_prob)  # directly set the path probability to 1
                     else:
                         prob = torch.gather(path_prob, dim=-1, index=selected_path).squeeze()  # bsz
@@ -760,6 +762,8 @@ class BertForSequenceClassification(BertPreTrainedModel):
                     paths.append(selected_path)
 
                 paths = torch.cat(paths, dim=-1)
+                if self.global_step % 200 == 0:
+                    print(paths[:20])
                 # if not self.training:
                 # we can add an expected saving computation here
                 # print("Layer ratio: %.3f%%" % (
