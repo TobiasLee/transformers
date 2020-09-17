@@ -197,27 +197,30 @@ class BertEncoder(nn.Module):
             for i in range(self.num_parts):
                 if len(hidden_states) == 0:
                     break
-                action_prob = self.agent(hidden_states)
-                if self.bound_alpha > 0:
-                    action_prob = self.adjust_prob(action_prob)  # adjust prob distribution according to alpha
+                # curriculum learning
+                if i < self.cl_idx:  # and self.training:
+                    action = torch.ones((len(hidden_states),), dtype=torch.long) * 2
+                    action_prob = torch.ones((len(hidden_states), self.agent.action_classifier.output_features))
+                else:
+                    action_prob = self.agent(hidden_states)
+                    if self.bound_alpha > 0:
+                        action_prob = self.adjust_prob(action_prob)  # adjust prob distribution according to alpha
+                        # policy gradient
+                    if self.training:
+                        m = Categorical(action_prob)
+                        action = m.sample()
+                    else:  # during evaluation, we do not sample but using the argmax for path selection
+                        action = torch.argmax(action_prob, dim=-1)
+
                 padded_prob = torch.ones((bsz, self.agent.action_classifier.out_features), device=device)
                 padded_prob[left_idx] = action_prob
                 action_probs = action_probs + (padded_prob,)
-                # policy gradient
-                if self.training:
-                    m = Categorical(action_prob)
-                    action = m.sample()
-                else:  # during evaluation, we do not sample but using the argmax for path selection
-                    action = torch.argmax(action_prob, dim=-1)
+
                 padded_action = torch.zeros(size=(bsz,), device=device, dtype=torch.long)
-
-                # curriculum learning
-                if i < self.cl_idx: #  and self.training:
-                    action = torch.ones_like(action) * 2
-                    padded_action[left_idx] = action
-
                 padded_action[left_idx] = action
                 actions = actions + (padded_action,)
+
+                # branchy logic
                 exit_idx = left_idx[action == 0]  # using 0 for current code
                 if len(exit_idx) > 0:
                     exited_logit = self.early_classifiers[i](hidden_states)[action == 0]
@@ -405,15 +408,15 @@ class BertEncoder(nn.Module):
         # critic_actions: bsz, num_parts( num_parts can be small than config since examples can exit early)
         for i in range(self.num_parts):
             if len(hidden_states) == 0:
-                break 
-            action_prob = self.agent(hidden_states)
-            action = torch.argmax(action_prob, dim=-1)
-            padded_action = torch.zeros((bsz,), device=device, dtype=torch.long)
-
+                break
             # curriculum learning
-            if i < self.cl_idx: # and self.training:
-                action = torch.ones_like(action)  *2
+            if i < self.cl_idx:  # and self.training:
+                action = torch.ones((len(hidden_states),)) * 2
+            else:
+                action_prob = self.agent(hidden_states)
+                action = torch.argmax(action_prob, dim=-1)
 
+            padded_action = torch.zeros((bsz,), device=device, dtype=torch.long)
             padded_action[left_idx] = action
             actions = actions + (padded_action,)
             # action: bsz,
@@ -826,7 +829,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
         correct_labels = predicted_labels.eq(labels)  #
         # paths = torch.cat(paths, dim=-1)  # bsz, num_parts
         expected_saving = paths.sum(dim=1).type_as(logits) / (self.bert.encoder.num_parts * 2)
-        sparse_reward = 1 - expected_saving #torch.pow(expected_saving, 2)
+        sparse_reward = 1 - expected_saving  # torch.pow(expected_saving, 2)
         error_penalty = torch.ones_like(sparse_reward) * error_penalty
         reward = torch.where(correct_labels, sparse_reward, error_penalty)
         return reward
