@@ -105,6 +105,11 @@ class BertEncoder(nn.Module):
         """how many num blocks is defined to use large blocks, ranges from [1, num_parts]"""
         self.cl_idx = index
 
+    def init_agent_pooler(self, pooler):
+        loaded_model = pooler.state_dict()
+        for name, param in self.agent.pooler.state_dict().items():
+            param.copy_(loaded_model[name])
+
     def init_highway_pooler(self, pooler):
         # 实际上在 copy 最后一层 pooler
         loaded_model = pooler.state_dict()
@@ -149,7 +154,7 @@ class BertEncoder(nn.Module):
             left_idx = torch.arange(bsz, device=device)
             large_interval = self.prd_n_layer // self.num_parts  #
             base_interval = self.scc_n_layer // self.num_parts
-            pattern = 63  # random.choice([i for i in range(0, 2 ** self.num_parts)])
+            pattern = 0  # random.choice([i for i in range(0, 2 ** self.num_parts)])
             internal_hidden = hidden_states
             all_early_logits = ()
             for i in range(self.num_parts):  # indeed, it is a six switch model
@@ -398,14 +403,16 @@ class BertEncoder(nn.Module):
             return layer_hidden_states, layer_output
 
         # critic_actions: bsz, num_parts( num_parts can be small than config since examples can exit early)
-        for i in enumerate(self.num_parts):
+        for i in range(self.num_parts):
+            if len(hidden_states) == 0:
+                break 
             action_prob = self.agent(hidden_states)
             action = torch.argmax(action_prob, dim=-1)
             padded_action = torch.zeros((bsz,), device=device, dtype=torch.long)
 
             # curriculum learning
             if i < self.cl_idx: # and self.training:
-                action = torch.ones_like(action) * 2
+                action = torch.ones_like(action)  *2
 
             padded_action[left_idx] = action
             actions = actions + (padded_action,)
@@ -680,7 +687,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
         elif self.bert.encoder.train_early_exit:
             internal_classifier_logits = outputs[-1]
 
-        if self.training and len(critic_actions) > 0:  # self-critic baseline
+        if self.training:  # self-critic baseline
             critic_outputs = self.bert(input_ids,
                                        critic_forward=True,
                                        attention_mask=attention_mask,
@@ -762,8 +769,9 @@ class BertForSequenceClassification(BertPreTrainedModel):
                     paths.append(selected_path)
 
                 paths = torch.cat(paths, dim=-1)
-                if self.global_step % 200 == 0:
+                if self.global_step % 400 == 0:
                     print(paths[:20])
+                    print(final_decision_prob[:20])
                 # if not self.training:
                 # we can add an expected saving computation here
                 # print("Layer ratio: %.3f%%" % (
@@ -818,7 +826,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
         correct_labels = predicted_labels.eq(labels)  #
         # paths = torch.cat(paths, dim=-1)  # bsz, num_parts
         expected_saving = paths.sum(dim=1).type_as(logits) / (self.bert.encoder.num_parts * 2)
-        sparse_reward = 1 - torch.pow(expected_saving, 2)
+        sparse_reward = 1 - expected_saving #torch.pow(expected_saving, 2)
         error_penalty = torch.ones_like(sparse_reward) * error_penalty
         reward = torch.where(correct_labels, sparse_reward, error_penalty)
         return reward
