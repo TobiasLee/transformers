@@ -88,7 +88,9 @@ class ModelArguments:
     el_beta: Optional[float] = field(
         default=0.999, metadata={"help": "el beta, for calculating effective num cls"}
     )
-
+    rl_beta: Optional[float] = field(
+        default=0.999, metadata={"help": "rl beta, for calculating effective num cls"}
+    )
 
 def main():
     # See all possible arguments in src/transformers/training_args.py
