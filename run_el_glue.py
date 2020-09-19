@@ -180,7 +180,7 @@ def main():
     elif model_args.loss_type == 'rl':  # reweighted loss
         model.set_loss_type('rl', {"beta": model_args.rl_beta})
     elif model_args.loss_type == 'mixed':  # reweighted loss
-        model.set_loss_type('rl', {"gamma": model_args.mixed_gamma})
+        model.set_loss_type('mixed', {"gamma": model_args.mixed_gamma})
 
     # Get datasets
     train_dataset = (
