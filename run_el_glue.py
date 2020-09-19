@@ -89,6 +89,14 @@ class ModelArguments:
         default=0.999, metadata={"help": "el beta, for calculating effective num cls"}
     )
 
+    rl_beta: Optional[float] = field(
+        default=0.999, metadata={"help": "rl beta, for calculating effective num cls"}
+    )
+
+    mixed_gamma: Optional[float] = field(
+        default=0.0, metadata={"help": "mixed focal loss gamma"}
+    )
+
 
 def main():
     # See all possible arguments in src/transformers/training_args.py
@@ -161,6 +169,7 @@ def main():
         config=config,
         cache_dir=model_args.cache_dir,
     )
+
     if model_args.loss_type == 'fl':  # focal_loss
         model.set_loss_type(model_args.loss_type, {"gamma": model_args.fl_gamma})
     elif model_args.loss_type == 'dl':  # dice loss
@@ -170,6 +179,9 @@ def main():
                                    "beta": model_args.el_beta})
     elif model_args.loss_type == 'rl':  # reweighted loss
         model.set_loss_type('rl', {"beta": model_args.rl_beta})
+    elif model_args.loss_type == 'mixed':  # reweighted loss
+        model.set_loss_type('mixed', {"gamma": model_args.mixed_gamma})
+
     # Get datasets
     train_dataset = (
         GlueDataset(data_args, tokenizer=tokenizer, evaluate=False) #cache_dir=model_args.cache_dir) 
