@@ -158,6 +158,46 @@ class FocalLoss(_WeightedLoss):
         return loss
 
 
+class MixedLoss(_WeightedLoss):
+    """ Mixed Focal loss & CE loss """
+
+    def __init__(self, gamma=1.0, mle_bound=0.5, focal_to_mle_rho=0.3,
+                 weight=None, size_average=None, ignore_index=-100,
+                 reduce=None, reduction='mean',
+                 ):
+        super(MixedLoss, self).__init__(weight, size_average, reduce, reduction)
+        assert gamma >= 0
+        self.gamma = gamma
+        self.mle_bound = mle_bound
+        self.weight = weight
+        self.rho = focal_to_mle_rho
+        self.ignore_index = ignore_index
+
+    def forward(self, input, target):
+        # size output torch.Size([128, 100]) target size torch.Size([128])
+        # bsz num_class
+        input_values = F.cross_entropy(input, target, reduction='none', weight=self.weight,
+                                       ignore_index=self.ignore_index)
+        p = torch.exp(-input_values)
+        # num_classes = input.size()[-1]
+        # print('num_classes',num_classes)
+        # num_rare_classes = int(num_classes * self.rho)
+        # (1-p) ^g *-logp * y  -logp*y
+        # bound value of mle higher
+        bound_value_mle = F.cross_entropy(self.mle_bound * torch.ones_like(input), target, reduction='none',
+                                          weight=self.weight, ignore_index=self.ignore_index)
+        # bound value of focal lower
+        bound_value_focal = (1 - self.mle_bound) ** self.gamma * F.cross_entropy(
+            self.mle_bound * torch.ones_like(input), target,
+            reduction='none', weight=self.weight, ignore_index=self.ignore_index)
+
+        continue_values = input_values - (bound_value_mle - bound_value_focal)
+        focal_values = (1 - p) ** self.gamma * input_values
+        loss = torch.where((p > self.mle_bound),
+                           continue_values, focal_values)
+        return loss.mean()
+
+
 def sigmoid_focal_loss(
         inputs: torch.Tensor,
         targets: torch.Tensor,
