@@ -199,8 +199,8 @@ class BertEncoder(nn.Module):
                     break
                 # curriculum learning
                 if i < self.cl_idx:  # and self.training:
-                    action = torch.ones((len(hidden_states),), dtype=torch.long) * 2
-                    action_prob = torch.ones((len(hidden_states), self.agent.action_classifier.output_features))
+                    action = torch.ones((len(hidden_states),), dtype=torch.long, device=device) * 2
+                    action_prob = torch.zeros((len(hidden_states), self.agent.action_classifier.out_features), device=device)
                 else:
                     action_prob = self.agent(hidden_states)
                     if self.bound_alpha > 0:
@@ -411,7 +411,7 @@ class BertEncoder(nn.Module):
                 break
             # curriculum learning
             if i < self.cl_idx:  # and self.training:
-                action = torch.ones((len(hidden_states),)) * 2
+                action = torch.ones((len(hidden_states),), device=device, dtype=torch.long) * 2
             else:
                 action_prob = self.agent(hidden_states)
                 action = torch.argmax(action_prob, dim=-1)

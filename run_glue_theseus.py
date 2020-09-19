@@ -245,9 +245,9 @@ def main():
         logger.info("Setting num parts as: %d" % model_args.num_parts)
         model.bert.encoder.num_parts = model_args.num_parts
 
-    assert model_args.train_early_exit ^ model_args.train_agent, "Two stage can only train agent or early exit"
-
-    model.bert.encoder.init_agent_pooler(model.bert.pooler) # init agent pooler 
+    # assert model_args.train_early_exit ^ model_args.train_agent, "Two stage can only train agent or early exit"
+    if training_args.do_train:
+        model.bert.encoder.init_agent_pooler(model.bert.pooler) # init agent pooler 
 
     if model_args.train_early_exit:
         # if second stage, the early exit is already trained
