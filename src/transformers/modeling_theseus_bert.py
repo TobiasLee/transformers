@@ -154,26 +154,35 @@ class BertEncoder(nn.Module):
             left_idx = torch.arange(bsz, device=device)
             large_interval = self.prd_n_layer // self.num_parts  #
             base_interval = self.scc_n_layer // self.num_parts
-            pattern = 0  # random.choice([i for i in range(0, 2 ** self.num_parts)])
-            internal_hidden = hidden_states
-            all_early_logits = ()
-            for i in range(self.num_parts):  # indeed, it is a six switch model
-                internal_logit = self.early_classifiers[i](internal_hidden)
-                all_early_logits = all_early_logits + (internal_logit,)
-                if pattern % 2 == 1:
-                    internal_hidden, _ = _run_sub_blocks(internal_hidden,
-                                                         self.layer[
-                                                         i * large_interval:i * large_interval + large_interval],
-                                                         left_idx)
+            # pattern = 0  # random.choice([i for i in range(0, 2 ** self.num_parts)])
+            # all_early_logits = ()
 
-                else:
-                    internal_hidden, _ = _run_sub_blocks(internal_hidden,
-                                                         self.scc_layer[
-                                                         i * base_interval:i * base_interval + base_interval],
-                                                         left_idx)
+            def _run(pattern_idx):
+                internal_hidden = hidden_states
+                early_exits_logits = ()
+                for i in range(self.num_parts):  # indeed, it is a six switch model
+                    internal_logit = self.early_classifiers[i](internal_hidden)
+                    early_exits_logits = early_exits_logits + (internal_logit,)
+                    if pattern_idx % 2 == 1:
+                        internal_hidden, _ = _run_sub_blocks(internal_hidden,
+                                                             self.layer[
+                                                             i * large_interval:i * large_interval + large_interval],
+                                                             left_idx)
 
-                pattern //= 2
-            outputs = (internal_hidden,)
+                    else:
+                        internal_hidden, _ = _run_sub_blocks(internal_hidden,
+                                                             self.scc_layer[
+                                                             i * base_interval:i * base_interval + base_interval],
+                                                             left_idx)
+
+                    pattern_idx //= 2
+                return internal_hidden, early_exits_logits
+
+            large_hidden, large_early_logits = _run(pattern_idx=2 ** self.num_parts - 1)
+            base_hidden, base_early_logits = _run(pattern_idx=0)
+            random_hidden, random_early_logits = _run(pattern_idx=random.choice([i for i in range(0, 2 ** self.num_parts)]))
+            outputs = (large_hidden,)
+            all_early_logits = large_early_logits + base_early_logits + random_early_logits
             outputs = outputs + (all_early_logits,)
             return outputs
 
@@ -200,7 +209,8 @@ class BertEncoder(nn.Module):
                 # curriculum learning
                 if i < self.cl_idx:  # and self.training:
                     action = torch.ones((len(hidden_states),), dtype=torch.long, device=device) * 2
-                    action_prob = torch.zeros((len(hidden_states), self.agent.action_classifier.out_features), device=device)
+                    action_prob = torch.zeros((len(hidden_states), self.agent.action_classifier.out_features),
+                                              device=device)
                 else:
                     action_prob = self.agent(hidden_states)
                     if self.bound_alpha > 0:
@@ -520,6 +530,25 @@ class LinearReplacementScheduler:
         current_replacing_rate = min(self.k * self.step_counter + self.base_replacing_rate, 1.0)
         self.bert_encoder.set_replacing_rate(current_replacing_rate)
         return current_replacing_rate
+
+
+class CurriculumLearningScheduler:
+    """Scheduler for curriculum learning"""
+
+    def __init__(self, bert_encoder: BertEncoder, initial_cl_idx=5, epoch_interval=5, num_parts=6):
+        self.bert_encoder = bert_encoder
+        self.epoch_counter = 0
+        self.bert_encoder.set_cl_idx(initial_cl_idx)
+        self.epoch_interval = epoch_interval
+        self.cl_idx = initial_cl_idx
+        self.total_parts = num_parts
+
+    def step(self):
+        # after epoch, decrease the cl_idx let agent learn more blocks
+        self.epoch_counter += 1
+        if self.epoch_counter % self.epoch_interval == 0:
+            self.cl_idx -= 1
+            self.bert_encoder.set_cl_idx(self.cl_idx)
 
 
 class BertPreTrainedModel(PreTrainedModel):
