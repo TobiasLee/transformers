@@ -101,7 +101,10 @@ if _has_sklearn:
             return {"acc": simple_accuracy(preds, labels)}
         elif task_name == 'twentyng':
             classification_report(preds, labels, output_dict=False)
-            return acc_and_all_f1(preds, labels) 
+            return acc_and_all_f1(preds, labels)
+        elif task_name == 'imdb':
+            classification_report(preds, labels, output_dict=False)
+            return acc_and_all_f1(preds, labels)
         else:
             raise KeyError(task_name)
 

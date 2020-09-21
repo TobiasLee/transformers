@@ -362,6 +362,30 @@ class TwentyNGProcessor(DataProcessor):
         return ["%d" % i for i in range(20)]
 
 
+class IMDBProcessor(DataProcessor):
+    def get_dev_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(self._read_tsv(os.path.join(data_dir, "dev.tsv")), "dev")
+
+    def get_train_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(self._read_tsv(os.path.join(data_dir, "train.tsv.clean.unbal")), "train")
+
+    def _create_examples(self, lines, set_type):
+        """Creates examples for the training, dev and test sets."""
+        examples = []
+        for (i, line) in enumerate(lines):
+            guid = "%s-%s" % (set_type, i)
+            text_a = line[0]
+            label = None if set_type == "test" else line[1]
+            examples.append(InputExample(guid=guid, text_a=text_a, text_b=None, label=label))
+        return examples
+
+    def get_labels(self):
+        """See base class."""
+        return ["0", "1"]
+
+
 class Sst2Processor(DataProcessor):
     """Processor for the SST-2 data set (GLUE version)."""
 
@@ -631,7 +655,8 @@ glue_tasks_num_labels = {
     "rte": 2,
     "wnli": 2,
     "persona": 2,
-    'twentyng': 20,
+    "twentyng": 20,
+    "imdb": 2
 }
 
 glue_processors = {
@@ -646,7 +671,8 @@ glue_processors = {
     "qnli": QnliProcessor,
     "rte": RteProcessor,
     "wnli": WnliProcessor,
-    'twentyng': TwentyNGProcessor
+    "twentyng": TwentyNGProcessor,
+    "imdb": IMDBProcessor
 }
 
 glue_output_modes = {
@@ -661,5 +687,6 @@ glue_output_modes = {
     "qnli": "classification",
     "rte": "classification",
     "wnli": "classification",
-    'twentyng': "classification"
+    "twentyng": "classification",
+    "imdb": "classification"
 }
