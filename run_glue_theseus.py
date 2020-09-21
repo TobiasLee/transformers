@@ -29,7 +29,7 @@ import torch.nn as nn
 from transformers import AutoConfig, AutoModelForSequenceClassification, AutoTokenizer, EvalPrediction, GlueDataset, \
     AdamW, get_linear_schedule_with_warmup
 from transformers.modeling_theseus_bert import BertForSequenceClassification, LinearReplacementScheduler, \
-    ConstantReplacementScheduler, LinearPenaltyRatioScheduler
+    ConstantReplacementScheduler, LinearPenaltyRatioScheduler, CurriculumLearningScheduler
 from transformers import GlueDataTrainingArguments as DataTrainingArguments
 from transformers import (
     HfArgumentParser,
@@ -123,6 +123,18 @@ class ModelArguments:
         default=False, metadata={"help": "Only large and exit action for switch agent"}
     )
 
+    cl_scheduler: bool = field(
+        default=False, metadata={"help": "use cl idx "}
+    )
+
+    cl_initial_idx: Optional[int] = field(
+        default=5, metadata={"help": "initial_cl idx, default: num_parts -1 "}
+    )
+
+    cl_interval: Optional[int] = field(
+        default=5, metadata={"help": "internal for decreasing cl idx"}
+    )
+
     path_penalty_ratio: Optional[float] = field(
         default=0.0, metadata={"help": "path penalty for selecting large block"}
     )
@@ -154,7 +166,7 @@ class ModelArguments:
     bound_alpha: Optional[float] = field(
         default=-1.0, metadata={"help": "bound alpha for adjusting the action probability"}
     )
-    
+
     cl_idx: Optional[int] = field(
         default=-1, metadata={"help": "curriculum learning idx, denotes how many layer is set to large directly"}
     )
@@ -245,9 +257,9 @@ def main():
         logger.info("Setting num parts as: %d" % model_args.num_parts)
         model.bert.encoder.num_parts = model_args.num_parts
 
-    assert model_args.train_early_exit ^ model_args.train_agent, "Two stage can only train agent or early exit"
-
-    model.bert.encoder.init_agent_pooler(model.bert.pooler) # init agent pooler 
+    # assert model_args.train_early_exit ^ model_args.train_agent, "Two stage can only train agent or early exit"
+    if training_args.do_train:
+        model.bert.encoder.init_agent_pooler(model.bert.pooler)  # init agent pooler
 
     if model_args.train_early_exit:
         # if second stage, the early exit is already trained
@@ -357,8 +369,14 @@ def main():
                 {'params': [p for p in model.bert.encoder.agent.parameters()]},
                 {'params': [p for p in model.bert.encoder.early_classifiers.parameters()]}
             ])
+    if model_args.cl_scheduler:
+        cl_scheduler = CurriculumLearningScheduler(model.bert.encoder,
+                                                   initial_cl_idx=model_args.num_parts - 1,  # default
+                                                   epoch_interval=model_args.cl_interval)
+    else:
+        cl_scheduler = None
 
-    # Get datasets
+        # Get datasets
     train_dataset = (
         GlueDataset(data_args, tokenizer=tokenizer, evaluate=False) if training_args.do_train else None
     )
@@ -372,7 +390,8 @@ def main():
         if training_args.do_predict
         else None
     )
-    # train_dataset = eval_dataset # for testing agent capability  
+
+    # train_dataset = eval_dataset # for testing agent capability
     def build_compute_metrics_fn(task_name: str) -> Callable[[EvalPrediction], Dict]:
         def compute_metrics_fn(p: EvalPrediction):
             if output_mode == "classification":
@@ -393,7 +412,8 @@ def main():
         theseus_replace_scheduler=replacing_rate_scheduler,
         optimizer_grouped_parameters=optimizer_grouped_parameters,
         logging_paths=model_args.logging_paths,
-        pr_scheduler=pr_scheduler
+        pr_scheduler=pr_scheduler,
+        cl_scheduler=cl_scheduler
     )
 
     # Training

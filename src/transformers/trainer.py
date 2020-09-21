@@ -185,6 +185,7 @@ class Trainer:
             pr_scheduler=None,
             el_start_epoch=-1,
             el_end_epoch=-1,
+            cl_scheduler=None,
     ):
         """
         Trainer is a simple but feature-complete training and eval loop for PyTorch,
@@ -211,6 +212,8 @@ class Trainer:
         self.pr_scheduler = pr_scheduler
         self.el_start_epoch = el_start_epoch
         self.el_end_epoch = el_end_epoch
+        self.cl_scheduler = cl_scheduler
+
         if self.el_start_epoch != -1 and self.el_end_epoch != -1:
             assert self.el_end_epoch > self.el_start_epoch, "End epoch must greater than start epoch"
 
@@ -478,6 +481,11 @@ class Trainer:
             epochs_trained, int(num_train_epochs), desc="Epoch", disable=not self.is_local_master()
         )
         for epoch in train_iterator:
+            if self.cl_scheduler is not None:
+                logger.info("Current cl idx:  %d (denotes model is supposed to learn the last %d switches" % (
+                    self.cl_scheduler.cl_idx,
+                    self.cl_scheduler.total_parts - self.cl_scheduler.cl_idx))
+
             if self.el_start_epoch != -1 and self.el_end_epoch != -1:  # el defer mechanism
                 if epoch < self.el_start_epoch:
                     self.model.set_loss_type("default")  # not start el yet, use CE loss
@@ -583,6 +591,9 @@ class Trainer:
             if self.args.tpu_metrics_debug:
                 # tpu-comment: Logging debug metrics for PyTorch/XLA (compile, execute times, ops, etc.)
                 xm.master_print(met.metrics_report())
+            if self.cl_scheduler is not None:
+                self.cl_scheduler.step()
+
 
         if self.tb_writer:
             self.tb_writer.close()

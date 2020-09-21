@@ -102,6 +102,9 @@ if _has_sklearn:
         elif task_name == 'twentyng':
             print(classification_report(y_pred=preds, y_true=labels, output_dict=False))
             return acc_and_all_f1(preds, labels) 
+        elif task_name == 'imdb':
+            print(classification_report(preds, labels, output_dict=False))
+            return acc_and_all_f1(preds, labels)
         else:
             raise KeyError(task_name)
 
