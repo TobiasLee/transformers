@@ -371,7 +371,7 @@ def main():
             ])
     if model_args.cl_scheduler:
         cl_scheduler = CurriculumLearningScheduler(model.bert.encoder,
-                                                   initial_cl_idx=model_args.num_parts - 1,  # default
+                                                   initial_cl_idx=model_args.cl_initial_idx,  # default
                                                    epoch_interval=model_args.cl_interval)
     else:
         cl_scheduler = None

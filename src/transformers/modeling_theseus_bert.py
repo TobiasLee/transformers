@@ -814,10 +814,16 @@ class BertForSequenceClassification(BertPreTrainedModel):
                     entropy_reward_fct = CrossEntropyLoss(reduction='none')
                     performance_reward = - entropy_reward_fct(logits.view(-1, self.num_labels), labels.view(-1))
                     reward = self.get_reward(logits, labels, paths, self.error_penalty)
+                    if self.global_step % 400 == 0:
+                        print('reward\n', reward[:20]) 
                     if critic_logits is not None:
                         padded_critic_paths = torch.cat(
                             [critic_action.unsqueeze(1) for critic_action in padded_critic_actions], dim=-1)
+                        if self.global_step % 400 == 0:
+                            print('critic path\n', padded_critic_paths[:20])
                         baseline = self.get_reward(critic_logits, labels, padded_critic_paths, self.error_penalty)
+                        if self.global_step % 400 == 0:
+                            print('baseline\n', baseline[:20])
                         reward = reward - baseline  # minus self-critic baseline
                 else:
                     raise ValueError("Current the regression is not supported")
@@ -830,7 +836,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
                 # reward = performance_reward + penalty_reward
                 # if self.use_baseline:
                 #    reward = reward - torch.mean(reward)  # minus baseline
-                final_decision_prob = final_decision_prob.clamp(1e-9, 1 - 1e-9)
+                # final_decision_prob = final_decision_prob.clamp(1e-9, 1 - 1e-9)
                 loss = - reward * torch.log(final_decision_prob)  # sum over bsz
 
                 # entropy loss
