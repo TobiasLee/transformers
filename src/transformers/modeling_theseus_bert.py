@@ -206,9 +206,9 @@ class BertEncoder(nn.Module):
             for i in range(self.num_parts):
                 if len(hidden_states) == 0:
                     break
-                # curriculum learning
-                if i < self.cl_idx:  # and self.training:
-                    action = torch.ones((len(hidden_states),), dtype=torch.long, device=device) * 2
+                # curriculum learning, from first block to last
+                if i > self.cl_idx:  # and self.training:
+                    action = torch.zeros((len(hidden_states),), dtype=torch.long, device=device) * 2
                     action_prob = torch.zeros((len(hidden_states), self.agent.action_classifier.out_features),
                                               device=device)
                 else:
@@ -420,8 +420,8 @@ class BertEncoder(nn.Module):
             if len(hidden_states) == 0:
                 break
             # curriculum learning
-            if i < self.cl_idx:  # and self.training:
-                action = torch.ones((len(hidden_states),), device=device, dtype=torch.long) * 2
+            if i > self.cl_idx:  # and self.training:
+                action = torch.zeros((len(hidden_states),), device=device, dtype=torch.long) * 2
             else:
                 action_prob = self.agent(hidden_states)
                 action = torch.argmax(action_prob, dim=-1)
@@ -547,7 +547,7 @@ class CurriculumLearningScheduler:
         # after epoch, decrease the cl_idx let agent learn more blocks
         self.epoch_counter += 1
         if self.epoch_counter % self.epoch_interval == 0:
-            self.cl_idx -= 1
+            self.cl_idx += 1
             self.bert_encoder.set_cl_idx(self.cl_idx)
 
 
@@ -792,7 +792,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
                 path_penalty = torch.zeros((bsz,), device=input_ids.device)
                 for i, (path_prob, action) in enumerate(zip(action_probs, actions)):
                     selected_path = action.unsqueeze(1)  # bsz, 1
-                    if i < self.bert.encoder.cl_idx:  # and self.training:
+                    if i > self.bert.encoder.cl_idx:  # and self.training:
                         prob = torch.ones_like(final_decision_prob)  # directly set the path probability to 1
                     else:
                         prob = torch.gather(path_prob, dim=-1, index=selected_path).squeeze()  # bsz
