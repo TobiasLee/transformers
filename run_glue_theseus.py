@@ -167,9 +167,15 @@ class ModelArguments:
         default=-1.0, metadata={"help": "bound alpha for adjusting the action probability"}
     )
 
+    entropy_beta: Optional[float] = field(
+        default=0.0, metadata={"help": "entropy weight for encouraging exploration"}
+    )
+
     cl_idx: Optional[int] = field(
         default=-1, metadata={"help": "curriculum learning idx, denotes how many layer is set to large directly"}
     )
+
+
     #
     # parser.add_argument("--replacing_rate", type=float, required=True,
     #                     help="Constant replacing rate. Also base replacing rate if using a scheduler.")
@@ -250,6 +256,9 @@ def main():
         config=config,
         cache_dir=model_args.cache_dir
     )
+
+    model.set_entropy_beta(model_args.entropy_beta)
+
     if model_args.switch_pattern != 0:
         logger.info("Setting inference path as:%d " % model_args.switch_pattern)
         model.set_switch_pattern(model_args.switch_pattern)

@@ -840,8 +840,8 @@ class BertForSequenceClassification(BertPreTrainedModel):
                 loss = - reward * torch.log(final_decision_prob)  # sum over bsz
 
                 # entropy loss
-                # entropy_loss = - final_decision_prob * torch.log(final_decision_prob)
-                # loss = loss - self.entropy_beta * entropy_loss  # minus action entropy
+                entropy_loss = - final_decision_prob * torch.log(final_decision_prob)
+                loss = loss - self.entropy_beta * entropy_loss  # minus action entropy
 
                 loss = loss.mean()
                 # if self.training:
