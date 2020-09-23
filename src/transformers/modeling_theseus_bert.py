@@ -182,7 +182,7 @@ class BertEncoder(nn.Module):
             base_hidden, base_early_logits = _run(pattern_idx=0)
             random_hidden, random_early_logits = _run(pattern_idx=random.choice([i for i in range(0, 2 ** self.num_parts)]))
             outputs = (large_hidden,)
-            all_early_logits = large_early_logits + base_early_logits + random_early_logits
+            all_early_logits =  large_early_logits +  base_early_logits  +  random_early_logits
             outputs = outputs + (all_early_logits,)
             return outputs
 
