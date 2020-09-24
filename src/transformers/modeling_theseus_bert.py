@@ -58,31 +58,28 @@ class RNNSwitchAgent(nn.Module):
         self.softmax = nn.Softmax(dim=-1)
         self.hidden_size = hidden_size 
 
-    def reset_hidden(self, batch_size, device, dtype):
-        print(dtype)
-        return (torch.zeros((1, batch_size, self.hidden_size), device=device, requires_grad=True, dtype=dtype),
-                    torch.zeros((1, batch_size, self.hidden_size), device=device, requires_grad=True, dtype=dtype))
+    def reset_hidden(self, batch_size, device, dtype, requires_grad=True):
+        return (torch.zeros((1, batch_size, self.hidden_size), device=device, requires_grad=requires_grad, dtype=dtype),
+                    torch.zeros((1, batch_size, self.hidden_size), device=device, requires_grad=requires_grad,  dtype=dtype))
         # self.hidden = None
 
-    def forward(self, hidden_states, left_idx):
+    def forward(self, hidden_states,  rnn_hidden):
         pooler_output = self.pooler(hidden_states)
         bsz = pooler_output.size(0)
         self.rnn.flatten_parameters()
-        rnn_hidden = None if self.hidden is None else (self.hidden[0][:, left_idx], self.hidden[1][:, left_idx])
-        print('left len: %d'% len(left_idx))
-        print('len rnn hidden:' , rnn_hidden[0].size())
+        # rnn_hidden = None if self.hidden is None else (self.hidden[0][:, left_idx], self.hidden[1][:, left_idx])
         out, new_hiddens = self.rnn(
             pooler_output.view(1, bsz, -1), rnn_hidden
         )
-        if self.hidden is None:  # first entry
-            self.hidden = new_hiddens
-        else:
+        #if self.hidden is None:  # first entry
+        #    self.hidden = new_hiddens
+        #else:
             # update hiddens
-            self.hidden[0][:, left_idx], self.hidden[1][:, left_idx] = new_hiddens[0], new_hiddens[1]
-        out = out.squeeze()
+        #    self.hidden[0][:, left_idx], self.hidden[1][:, left_idx] = new_hiddens[0], new_hiddens[1]
+        out = out.squeeze(0)
         action_logit = self.linear(out)
         action_prob = self.softmax(action_logit)
-        return action_prob
+        return action_prob, new_hiddens
 
 
 class SwitchAgent(nn.Module):
@@ -248,7 +245,8 @@ class BertEncoder(nn.Module):
             # early_exit_pairs = []
             early_exit_logits = ()
             early_exit_idxs = ()
-            self.rnn_agent.hidden = self.rnn_agent.reset_hidden(bsz, device, hidden_states.dtype)
+            rnn_hidden = self.rnn_agent.reset_hidden(bsz, device, hidden_states.dtype) # Tuple( (1,bsz, rnn_hidden), (1, bsz, rnn_hidden)) 
+            
             for i in range(self.num_parts):
                 if len(hidden_states) == 0:
                     break
@@ -258,7 +256,7 @@ class BertEncoder(nn.Module):
                     action_prob = torch.zeros((len(hidden_states), self.agent.action_classifier.out_features),
                                               device=device)
                 else:
-                    action_prob = self.rnn_agent(hidden_states, left_idx)
+                    action_prob, rnn_hidden = self.rnn_agent(hidden_states,  rnn_hidden) 
                     if self.bound_alpha > 0:
                         action_prob = self.adjust_prob(action_prob)  # adjust prob distribution according to alpha
                         # policy gradient
@@ -289,6 +287,8 @@ class BertEncoder(nn.Module):
                 base_input = hidden_states[action == 1]
                 large_input = hidden_states[action == 2]
 
+                rnn_hidden = (rnn_hidden[0][:, action!=0], rnn_hidden[1][:, action!=0] )
+                
                 base_hiddens = base_input
                 large_hiddens = large_input
 
@@ -311,7 +311,7 @@ class BertEncoder(nn.Module):
                 sorted_idx, order = torch.sort(torch.cat((base_idx, large_idx), dim=0))
                 left_idx = sorted_idx
                 hidden_states = hidden_states[order]  # order left hidden it back
-
+                
                 if self.output_hidden_states:
                     all_hidden_states = all_hidden_states + (
                         (base_hiddens, large_hiddens),)  # emit for the first hidden states?
@@ -454,6 +454,7 @@ class BertEncoder(nn.Module):
         early_exit_idxs = ()
         actions = ()
 
+        rnn_hidden = self.rnn_agent.reset_hidden(bsz, device, dtype=hidden_states.dtype, requires_grad=False)
         def _run_sub_blocks(layer_hidden_states, layers, idx):
             for i, layer in enumerate(layers):
                 layer_output = layer(layer_hidden_states, attention_mask[idx], None, encoder_hidden_states,
@@ -469,7 +470,7 @@ class BertEncoder(nn.Module):
             if i > self.cl_idx:  # and self.training:
                 action = torch.zeros((len(hidden_states),), device=device, dtype=torch.long) * 2
             else:
-                action_prob = self.rnn_agent(hidden_states, left_idx)
+                action_prob, rnn_hidden = self.rnn_agent(hidden_states, rnn_hidden)
                 action = torch.argmax(action_prob, dim=-1)
 
             padded_action = torch.zeros((bsz,), device=device, dtype=torch.long)
@@ -488,6 +489,7 @@ class BertEncoder(nn.Module):
             base_input = hidden_states[action == 1]
             large_input = hidden_states[action == 2]
 
+            rnn_hidden = (rnn_hidden[0][:, action!=0], rnn_hidden[1][:, action!=0] )
             base_hiddens = base_input
             large_hiddens = large_input
 
@@ -689,7 +691,8 @@ class BertModel(BertPreTrainedModel):
                                            encoder_hidden_states=encoder_hidden_states,
                                            encoder_attention_mask=encoder_extended_attention_mask)
         else:
-            encoder_outputs = self.encoder.critic_forward(embedding_output,
+            with torch.no_grad():
+                encoder_outputs = self.encoder.critic_forward(embedding_output,
                                                           attention_mask=extended_attention_mask,
                                                           head_mask=head_mask,
                                                           encoder_hidden_states=encoder_hidden_states,
