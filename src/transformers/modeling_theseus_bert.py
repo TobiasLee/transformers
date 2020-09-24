@@ -44,6 +44,40 @@ class EarlyClassifier(nn.Module):
         return logits
 
 
+class RNNSwitchAgent(nn.Module):
+    def __init__(self, config, hidden_size, n_action_space=2, rnn_type='lstm'):
+        super(RNNSwitchAgent, self).__init__()
+        self.pooler = BertPooler(config)
+        if self.rnn_type == "lstm":
+            self.rnn = nn.LSTM(self.pooler.dense.out_features, hidden_size)
+        else:
+            raise ValueError("current not supported other type rnn")
+        self.hidden = None
+        self.linear = nn.Linear(hidden_size, n_action_space)
+        self.softmax = nn.Softmax(dim=-1)
+
+    def reset_hidden(self):
+        self.hidden = None
+
+    def forward(self, hidden_states, left_idx):
+        pooler_output = self.pooler(hidden_states)
+        bsz = pooler_output.size(0)
+        self.rnn.flatten_parameters()
+        rnn_hidden = None if self.hidden is None else (self.hidden[0][left_idx], self.hidden[1][left_idx])
+        out, new_hiddens = self.rnn(
+            pooler_output.view(1, bsz, -1), rnn_hidden
+        )
+        if self.hidden is None:  # first entry
+            self.hidden = new_hiddens
+        else:
+            # update hiddens
+            self.hidden[0][left_idx], self.hidden[1][left_idx] = new_hiddens[0], new_hiddens[1]
+        out = out.squeeze()
+        action_logit = self.linear(out)
+        action_prob = self.softmax(action_logit)
+        return action_prob
+
+
 class SwitchAgent(nn.Module):
     def __init__(self, config, n_action_space=2):
         super(SwitchAgent, self).__init__()
@@ -92,6 +126,8 @@ class BertEncoder(nn.Module):
         self.only_large_and_exit = only_large_and_exit
         self.bound_alpha = bound_alpha
         self.cl_idx = -1
+        self.rnn_agent = RNNSwitchAgent(config, hidden_size=32, n_action_space=n_action_space,
+                                        rnn_type="lstm")
 
     def set_replacing_rate(self, replacing_rate):
         if not 0 < replacing_rate <= 1:
@@ -108,6 +144,8 @@ class BertEncoder(nn.Module):
     def init_agent_pooler(self, pooler):
         loaded_model = pooler.state_dict()
         for name, param in self.agent.pooler.state_dict().items():
+            param.copy_(loaded_model[name])
+        for name, param in self.rnn_agent.pooler.state_dict().items():
             param.copy_(loaded_model[name])
 
     def init_highway_pooler(self, pooler):
@@ -180,7 +218,8 @@ class BertEncoder(nn.Module):
 
             large_hidden, large_early_logits = _run(pattern_idx=2 ** self.num_parts - 1)
             base_hidden, base_early_logits = _run(pattern_idx=0)
-            random_hidden, random_early_logits = _run(pattern_idx=random.choice([i for i in range(0, 2 ** self.num_parts)]))
+            random_hidden, random_early_logits = _run(
+                pattern_idx=random.choice([i for i in range(0, 2 ** self.num_parts)]))
             outputs = (large_hidden,)
             all_early_logits = large_early_logits + base_early_logits + random_early_logits
             outputs = outputs + (all_early_logits,)
@@ -212,7 +251,7 @@ class BertEncoder(nn.Module):
                     action_prob = torch.zeros((len(hidden_states), self.agent.action_classifier.out_features),
                                               device=device)
                 else:
-                    action_prob = self.agent(hidden_states)
+                    action_prob = self.rnn_agent(hidden_states)
                     if self.bound_alpha > 0:
                         action_prob = self.adjust_prob(action_prob)  # adjust prob distribution according to alpha
                         # policy gradient
@@ -423,7 +462,7 @@ class BertEncoder(nn.Module):
             if i > self.cl_idx:  # and self.training:
                 action = torch.zeros((len(hidden_states),), device=device, dtype=torch.long) * 2
             else:
-                action_prob = self.agent(hidden_states)
+                action_prob = self.rnn_agent(hidden_states)
                 action = torch.argmax(action_prob, dim=-1)
 
             padded_action = torch.zeros((bsz,), device=device, dtype=torch.long)
