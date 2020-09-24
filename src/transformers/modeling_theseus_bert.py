@@ -6,6 +6,7 @@ import logging
 from typing import Tuple
 
 import torch
+import torch.autograd as autograd
 from torch import nn
 from torch.nn import CrossEntropyLoss, MSELoss
 from torch.distributions.bernoulli import Bernoulli
@@ -48,22 +49,28 @@ class RNNSwitchAgent(nn.Module):
     def __init__(self, config, hidden_size, n_action_space=2, rnn_type='lstm'):
         super(RNNSwitchAgent, self).__init__()
         self.pooler = BertPooler(config)
-        if self.rnn_type == "lstm":
+        if rnn_type == "lstm":
             self.rnn = nn.LSTM(self.pooler.dense.out_features, hidden_size)
         else:
             raise ValueError("current not supported other type rnn")
         self.hidden = None
         self.linear = nn.Linear(hidden_size, n_action_space)
         self.softmax = nn.Softmax(dim=-1)
+        self.hidden_size = hidden_size 
 
-    def reset_hidden(self):
-        self.hidden = None
+    def reset_hidden(self, batch_size, device, dtype):
+        print(dtype)
+        return (torch.zeros((1, batch_size, self.hidden_size), device=device, requires_grad=True, dtype=dtype),
+                    torch.zeros((1, batch_size, self.hidden_size), device=device, requires_grad=True, dtype=dtype))
+        # self.hidden = None
 
     def forward(self, hidden_states, left_idx):
         pooler_output = self.pooler(hidden_states)
         bsz = pooler_output.size(0)
         self.rnn.flatten_parameters()
-        rnn_hidden = None if self.hidden is None else (self.hidden[0][left_idx], self.hidden[1][left_idx])
+        rnn_hidden = None if self.hidden is None else (self.hidden[0][:, left_idx], self.hidden[1][:, left_idx])
+        print('left len: %d'% len(left_idx))
+        print('len rnn hidden:' , rnn_hidden[0].size())
         out, new_hiddens = self.rnn(
             pooler_output.view(1, bsz, -1), rnn_hidden
         )
@@ -71,7 +78,7 @@ class RNNSwitchAgent(nn.Module):
             self.hidden = new_hiddens
         else:
             # update hiddens
-            self.hidden[0][left_idx], self.hidden[1][left_idx] = new_hiddens[0], new_hiddens[1]
+            self.hidden[0][:, left_idx], self.hidden[1][:, left_idx] = new_hiddens[0], new_hiddens[1]
         out = out.squeeze()
         action_logit = self.linear(out)
         action_prob = self.softmax(action_logit)
@@ -241,7 +248,7 @@ class BertEncoder(nn.Module):
             # early_exit_pairs = []
             early_exit_logits = ()
             early_exit_idxs = ()
-
+            self.rnn_agent.hidden = self.rnn_agent.reset_hidden(bsz, device, hidden_states.dtype)
             for i in range(self.num_parts):
                 if len(hidden_states) == 0:
                     break
@@ -251,7 +258,7 @@ class BertEncoder(nn.Module):
                     action_prob = torch.zeros((len(hidden_states), self.agent.action_classifier.out_features),
                                               device=device)
                 else:
-                    action_prob = self.rnn_agent(hidden_states)
+                    action_prob = self.rnn_agent(hidden_states, left_idx)
                     if self.bound_alpha > 0:
                         action_prob = self.adjust_prob(action_prob)  # adjust prob distribution according to alpha
                         # policy gradient
@@ -310,7 +317,7 @@ class BertEncoder(nn.Module):
                         (base_hiddens, large_hiddens),)  # emit for the first hidden states?
                 if self.output_attentions:
                     all_attentions = all_attentions + ((base_outputs[1], large_outputs[1]),)
-
+            
             outputs = (hidden_states,)
 
             outputs = outputs + (left_idx,
@@ -462,7 +469,7 @@ class BertEncoder(nn.Module):
             if i > self.cl_idx:  # and self.training:
                 action = torch.zeros((len(hidden_states),), device=device, dtype=torch.long) * 2
             else:
-                action_prob = self.rnn_agent(hidden_states)
+                action_prob = self.rnn_agent(hidden_states, left_idx)
                 action = torch.argmax(action_prob, dim=-1)
 
             padded_action = torch.zeros((bsz,), device=device, dtype=torch.long)
