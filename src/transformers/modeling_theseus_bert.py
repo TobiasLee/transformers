@@ -56,14 +56,14 @@ class RNNSwitchAgent(nn.Module):
         self.hidden = None
         self.linear = nn.Linear(hidden_size, n_action_space)
         self.softmax = nn.Softmax(dim=-1)
-        self.hidden_size = hidden_size 
+        self.hidden_size = hidden_size
 
     def reset_hidden(self, batch_size, device, dtype, requires_grad=True):
         return (torch.zeros((1, batch_size, self.hidden_size), device=device, requires_grad=requires_grad, dtype=dtype),
-                    torch.zeros((1, batch_size, self.hidden_size), device=device, requires_grad=requires_grad,  dtype=dtype))
+                torch.zeros((1, batch_size, self.hidden_size), device=device, requires_grad=requires_grad, dtype=dtype))
         # self.hidden = None
 
-    def forward(self, hidden_states,  rnn_hidden):
+    def forward(self, hidden_states, rnn_hidden):
         pooler_output = self.pooler(hidden_states)
         bsz = pooler_output.size(0)
         self.rnn.flatten_parameters()
@@ -71,15 +71,30 @@ class RNNSwitchAgent(nn.Module):
         out, new_hiddens = self.rnn(
             pooler_output.view(1, bsz, -1), rnn_hidden
         )
-        #if self.hidden is None:  # first entry
+        # if self.hidden is None:  # first entry
         #    self.hidden = new_hiddens
-        #else:
-            # update hiddens
+        # else:
+        # update hiddens
         #    self.hidden[0][:, left_idx], self.hidden[1][:, left_idx] = new_hiddens[0], new_hiddens[1]
         out = out.squeeze(0)
         action_logit = self.linear(out)
         action_prob = self.softmax(action_logit)
         return action_prob, new_hiddens
+
+
+class MeanPooler(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.dense = nn.Linear(config.hidden_size, config.hidden_size)
+        self.activation = nn.Tanh()
+
+    def forward(self, hidden_states):
+        # We "pool" the model by simply taking the hidden state corresponding
+        # to the first token.
+        mean_token_tensor = torch.mean(hidden_states, dim=1)
+        pooled_output = self.dense(mean_token_tensor)
+        pooled_output = self.activation(pooled_output)
+        return pooled_output
 
 
 class SwitchAgent(nn.Module):
@@ -196,6 +211,7 @@ class BertEncoder(nn.Module):
             left_idx = torch.arange(bsz, device=device)
             large_interval = self.prd_n_layer // self.num_parts  #
             base_interval = self.scc_n_layer // self.num_parts
+
             # pattern = 0  # random.choice([i for i in range(0, 2 ** self.num_parts)])
             # all_early_logits = ()
 
@@ -225,7 +241,7 @@ class BertEncoder(nn.Module):
             random_hidden, random_early_logits = _run(
                 pattern_idx=random.choice([i for i in range(0, 2 ** self.num_parts)]))
             outputs = (large_hidden,)
-            all_early_logits =  large_early_logits +  base_early_logits  +  random_early_logits
+            all_early_logits = large_early_logits + base_early_logits + random_early_logits
             outputs = outputs + (all_early_logits,)
             return outputs
 
@@ -245,8 +261,9 @@ class BertEncoder(nn.Module):
             # early_exit_pairs = []
             early_exit_logits = ()
             early_exit_idxs = ()
-            rnn_hidden = self.rnn_agent.reset_hidden(bsz, device, hidden_states.dtype) # Tuple( (1,bsz, rnn_hidden), (1, bsz, rnn_hidden)) 
-            
+            rnn_hidden = self.rnn_agent.reset_hidden(bsz, device,
+                                                     hidden_states.dtype)  # Tuple( (1,bsz, rnn_hidden), (1, bsz, rnn_hidden))
+
             for i in range(self.num_parts):
                 if len(hidden_states) == 0:
                     break
@@ -256,7 +273,7 @@ class BertEncoder(nn.Module):
                     action_prob = torch.zeros((len(hidden_states), self.agent.action_classifier.out_features),
                                               device=device)
                 else:
-                    action_prob, rnn_hidden = self.rnn_agent(hidden_states,  rnn_hidden) 
+                    action_prob, rnn_hidden = self.rnn_agent(hidden_states, rnn_hidden)
                     if self.bound_alpha > 0:
                         action_prob = self.adjust_prob(action_prob)  # adjust prob distribution according to alpha
                         # policy gradient
@@ -287,8 +304,8 @@ class BertEncoder(nn.Module):
                 base_input = hidden_states[action == 1]
                 large_input = hidden_states[action == 2]
 
-                rnn_hidden = (rnn_hidden[0][:, action!=0], rnn_hidden[1][:, action!=0] )
-                
+                rnn_hidden = (rnn_hidden[0][:, action != 0], rnn_hidden[1][:, action != 0])
+
                 base_hiddens = base_input
                 large_hiddens = large_input
 
@@ -311,13 +328,13 @@ class BertEncoder(nn.Module):
                 sorted_idx, order = torch.sort(torch.cat((base_idx, large_idx), dim=0))
                 left_idx = sorted_idx
                 hidden_states = hidden_states[order]  # order left hidden it back
-                
+
                 if self.output_hidden_states:
                     all_hidden_states = all_hidden_states + (
                         (base_hiddens, large_hiddens),)  # emit for the first hidden states?
                 if self.output_attentions:
                     all_attentions = all_attentions + ((base_outputs[1], large_outputs[1]),)
-            
+
             outputs = (hidden_states,)
 
             outputs = outputs + (left_idx,
@@ -455,6 +472,7 @@ class BertEncoder(nn.Module):
         actions = ()
 
         rnn_hidden = self.rnn_agent.reset_hidden(bsz, device, dtype=hidden_states.dtype, requires_grad=False)
+
         def _run_sub_blocks(layer_hidden_states, layers, idx):
             for i, layer in enumerate(layers):
                 layer_output = layer(layer_hidden_states, attention_mask[idx], None, encoder_hidden_states,
@@ -489,7 +507,7 @@ class BertEncoder(nn.Module):
             base_input = hidden_states[action == 1]
             large_input = hidden_states[action == 2]
 
-            rnn_hidden = (rnn_hidden[0][:, action!=0], rnn_hidden[1][:, action!=0] )
+            rnn_hidden = (rnn_hidden[0][:, action != 0], rnn_hidden[1][:, action != 0])
             base_hiddens = base_input
             large_hiddens = large_input
 
@@ -693,10 +711,10 @@ class BertModel(BertPreTrainedModel):
         else:
             with torch.no_grad():
                 encoder_outputs = self.encoder.critic_forward(embedding_output,
-                                                          attention_mask=extended_attention_mask,
-                                                          head_mask=head_mask,
-                                                          encoder_hidden_states=encoder_hidden_states,
-                                                          encoder_attention_mask=encoder_extended_attention_mask)
+                                                              attention_mask=extended_attention_mask,
+                                                              head_mask=head_mask,
+                                                              encoder_hidden_states=encoder_hidden_states,
+                                                              encoder_attention_mask=encoder_extended_attention_mask)
         sequence_output = encoder_outputs[0]
         pooled_output = self.pooler(sequence_output)
 
@@ -864,7 +882,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
                     performance_reward = - entropy_reward_fct(logits.view(-1, self.num_labels), labels.view(-1))
                     reward = self.get_reward(logits, labels, paths, self.error_penalty)
                     if self.global_step % 400 == 0:
-                        print('reward\n', reward[:20]) 
+                        print('reward\n', reward[:20])
                     if critic_logits is not None:
                         padded_critic_paths = torch.cat(
                             [critic_action.unsqueeze(1) for critic_action in padded_critic_actions], dim=-1)
