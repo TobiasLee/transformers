@@ -45,10 +45,25 @@ class EarlyClassifier(nn.Module):
         return logits
 
 
+class MeanPooler(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.dense = nn.Linear(config.hidden_size, config.hidden_size)
+        self.activation = nn.Tanh()
+
+    def forward(self, hidden_states):
+        # We "pool" the model by simply taking the hidden state corresponding
+        # to the first token.
+        mean_token_tensor = torch.mean(hidden_states, dim=1)
+        pooled_output = self.dense(mean_token_tensor)
+        pooled_output = self.activation(pooled_output)
+        return pooled_output
+
+
 class RNNSwitchAgent(nn.Module):
     def __init__(self, config, hidden_size, n_action_space=2, rnn_type='lstm'):
         super(RNNSwitchAgent, self).__init__()
-        self.pooler = BertPooler(config)
+        self.pooler = MeanPooler(config)
         if rnn_type == "lstm":
             self.rnn = nn.LSTM(self.pooler.dense.out_features, hidden_size)
         else:
@@ -67,7 +82,7 @@ class RNNSwitchAgent(nn.Module):
         pooler_output = self.pooler(hidden_states)
         bsz = pooler_output.size(0)
         self.rnn.flatten_parameters()
-        # rnn_hidden = None if self.hidden is None else (self.hidden[0][:, left_idx], self.hidden[1][:, left_idx])
+
         out, new_hiddens = self.rnn(
             pooler_output.view(1, bsz, -1), rnn_hidden
         )
@@ -130,7 +145,7 @@ class BertEncoder(nn.Module):
         self.only_large_and_exit = only_large_and_exit
         self.bound_alpha = bound_alpha
         self.cl_idx = -1
-        self.rnn_agent = RNNSwitchAgent(config, hidden_size=32, n_action_space=n_action_space,
+        self.rnn_agent = RNNSwitchAgent(config, hidden_size=128, n_action_space=n_action_space,
                                         rnn_type="lstm")
 
     def set_replacing_rate(self, replacing_rate):
@@ -256,6 +271,8 @@ class BertEncoder(nn.Module):
                     action_prob = torch.zeros((len(hidden_states), self.agent.action_classifier.out_features),
                                               device=device)
                 else:
+
+                    # action_prob = self.agent(hidden_states)
                     action_prob, rnn_hidden = self.rnn_agent(hidden_states,  rnn_hidden) 
                     if self.bound_alpha > 0:
                         action_prob = self.adjust_prob(action_prob)  # adjust prob distribution according to alpha
@@ -470,6 +487,8 @@ class BertEncoder(nn.Module):
             if i > self.cl_idx:  # and self.training:
                 action = torch.zeros((len(hidden_states),), device=device, dtype=torch.long) * 2
             else:
+
+                # action_prob = self.agent(hidden_states) # , rnn_hidden)
                 action_prob, rnn_hidden = self.rnn_agent(hidden_states, rnn_hidden)
                 action = torch.argmax(action_prob, dim=-1)
 
@@ -850,9 +869,9 @@ class BertForSequenceClassification(BertPreTrainedModel):
                     paths.append(selected_path)
 
                 paths = torch.cat(paths, dim=-1)
-                if self.global_step % 400 == 0:
-                    print(paths[:20])
-                    print(final_decision_prob[:20])
+                if self.global_step % 500 == 0:
+                    print(paths[:10])
+                    print(final_decision_prob[:10])
                 # if not self.training:
                 # we can add an expected saving computation here
                 # print("Layer ratio: %.3f%%" % (
@@ -863,16 +882,16 @@ class BertForSequenceClassification(BertPreTrainedModel):
                     entropy_reward_fct = CrossEntropyLoss(reduction='none')
                     performance_reward = - entropy_reward_fct(logits.view(-1, self.num_labels), labels.view(-1))
                     reward = self.get_reward(logits, labels, paths, self.error_penalty)
-                    if self.global_step % 400 == 0:
-                        print('reward\n', reward[:20]) 
+                    if self.global_step % 500 == 0:
+                        print('reward\n', reward[:10]) 
                     if critic_logits is not None:
                         padded_critic_paths = torch.cat(
                             [critic_action.unsqueeze(1) for critic_action in padded_critic_actions], dim=-1)
-                        if self.global_step % 400 == 0:
-                            print('critic path\n', padded_critic_paths[:20])
+                        if self.global_step % 500 == 0:
+                            print('critic path\n', padded_critic_paths[:10])
                         baseline = self.get_reward(critic_logits, labels, padded_critic_paths, self.error_penalty)
-                        if self.global_step % 400 == 0:
-                            print('baseline\n', baseline[:20])
+                        if self.global_step % 500 == 0:
+                            print('baseline\n', baseline[:10])
                         reward = reward - baseline  # minus self-critic baseline
                 else:
                     raise ValueError("Current the regression is not supported")
