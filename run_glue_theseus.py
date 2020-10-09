@@ -15,6 +15,7 @@
 # limitations under the License.
 """ Finetuning the library models for sequence classification on GLUE (Bert, XLM, XLNet, RoBERTa, Albert, XLM-RoBERTa)."""
 from copy import deepcopy
+from itertools import combinations_with_replacement
 
 import dataclasses
 import logging
@@ -175,6 +176,9 @@ class ModelArguments:
         default=-1, metadata={"help": "curriculum learning idx, denotes how many layer is set to large directly"}
     )
 
+    path_idx: Optional[int] = field(
+        default=-1, metadata={"help": "path idx for checking the optimal path"}
+    )
 
     #
     # parser.add_argument("--replacing_rate", type=float, required=True,
@@ -284,7 +288,20 @@ def main():
     if model_args.early_exit_idx != -1:
         logger.info("Setting early exit at block %d" % model_args.early_exit_idx)
         model.bert.encoder.early_exit_idx = model_args.early_exit_idx
+    if model_args.path_idx != -1:
+        paths = []
 
+        def generate(k, arr):
+            if k > 6:
+                return
+            elif k <= 6:
+                paths.append(arr + [0] * (6 - len(arr)))
+                generate(k + 1, arr + [1]), generate(k + 1, arr + [2])
+
+        generate(0, [])
+        logger.info("select path:\n")
+        logger.info(str(paths[model_args.path_idx]))  # 1 - 126
+        model.bert.encoder.path_idx = paths[model_args.path_idx]
     # Replace rate scheduler
     if model_args.scheduler_type == 'none':
         replacing_rate_scheduler = ConstantReplacementScheduler(bert_encoder=model.bert.encoder,

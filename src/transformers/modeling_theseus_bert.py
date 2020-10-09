@@ -162,6 +162,7 @@ class BertEncoder(nn.Module):
         self.cl_idx = -1
         self.rnn_agent = RNNSwitchAgent(config, hidden_size=128, n_action_space=n_action_space,
                                         rnn_type="lstm")
+        self.path_idx = []  # directly set path idx
 
     def set_replacing_rate(self, replacing_rate):
         if not 0 < replacing_rate <= 1:
@@ -278,7 +279,7 @@ class BertEncoder(nn.Module):
             early_exit_idxs = ()
             rnn_hidden = self.rnn_agent.reset_hidden(bsz, device,
                                                      hidden_states.dtype)  # Tuple( (1,bsz, rnn_hidden), (1, bsz, rnn_hidden))
-
+            path_idx = self.path_idx
             for i in range(self.num_parts):
                 if len(hidden_states) == 0:
                     break
@@ -297,7 +298,10 @@ class BertEncoder(nn.Module):
                         m = Categorical(action_prob)
                         action = m.sample()
                     else:  # during evaluation, we do not sample but using the argmax for path selection
-                        action = torch.argmax(action_prob, dim=-1)
+                        if len(path_idx) != 0:  # use set path idx
+                            action = torch.ones((len(hidden_states),), dtype=torch.long, device=device) * path_idx[i]
+                        else:
+                            action = torch.argmax(action_prob, dim=-1)
 
                 padded_prob = torch.ones((bsz, self.agent.action_classifier.out_features), device=device)
                 padded_prob[left_idx] = action_prob

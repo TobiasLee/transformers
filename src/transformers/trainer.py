@@ -594,7 +594,6 @@ class Trainer:
             if self.cl_scheduler is not None:
                 self.cl_scheduler.step()
 
-
         if self.tb_writer:
             self.tb_writer.close()
 
@@ -886,13 +885,13 @@ class Trainer:
             print(paths[:5])
             print(eval_path_prob[:5])
             total_sum = 0.0
-            exit_array = np.zeros((13, ))
+            exit_array = np.zeros((13,))
             for batch_path in paths:
                 total_sum += np.sum(batch_path.cpu().numpy()) * 2
-                exit_idx = np.sum(batch_path.cpu.numpy() > 0, axis=1) # bsz,
+                exit_idx = np.sum(batch_path.cpu().numpy() > 0, axis=1)  # bsz,
                 for idx in exit_idx:
                     exit_array[idx] += 1
-            expected_saving = 1 - total_sum / len(label_ids) / 12
+            expected_saving = 1 - total_sum / len(label_ids) / 12 / 2
             exit_distribution = {i: exit_array[i] for i in range(len(exit_array))}
             logger.info(str(exit_distribution))
 
