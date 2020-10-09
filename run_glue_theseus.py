@@ -268,7 +268,8 @@ def main():
 
     # assert model_args.train_early_exit ^ model_args.train_agent, "Two stage can only train agent or early exit"
     if training_args.do_train:
-        model.bert.encoder.init_agent_pooler(model.bert.pooler)  # init agent pooler
+        logger.info("POOLER NOT INTIALIZED")
+        # model.bert.encoder.init_agent_pooler(model.bert.pooler)  # init agent pooler
 
     if model_args.train_early_exit:
         # if second stage, the early exit is already trained
