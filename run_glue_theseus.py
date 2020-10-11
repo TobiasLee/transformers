@@ -329,7 +329,7 @@ def main():
         model.bert.encoder.cl_idx = model_args.cl_idx
 
     scc_n_layer = model.bert.encoder.scc_n_layer
-    if training_args.do_train and not model_args.switch_mode:
+    if (training_args.do_train and not model_args.switch_mode):
         model.bert.encoder.scc_layer = nn.ModuleList(
             [deepcopy(model.bert.encoder.layer[ix]) for ix in range(scc_n_layer)])
 
@@ -492,9 +492,10 @@ def main():
 
         for test_dataset in test_datasets:
             predictions = trainer.predict(test_dataset=test_dataset).predictions
+            logits = predictions 
             if output_mode == "classification":
                 predictions = np.argmax(predictions, axis=1)
-
+            
             output_test_file = os.path.join(
                 training_args.output_dir, f"test_results_{test_dataset.args.task_name}.txt"
             )
@@ -507,7 +508,7 @@ def main():
                             writer.write("%d\t%3.3f\n" % (index, item))
                         else:
                             item = test_dataset.get_labels()[item]
-                            writer.write("%d\t%s\n" % (index, item))
+                            writer.write("%d\t%s\t%s\n" % (index, item, str(logits[index])))
     return eval_results
 
 
