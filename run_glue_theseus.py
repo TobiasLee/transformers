@@ -293,10 +293,10 @@ def main():
         paths = []
 
         def generate(k, arr):
-            if k > 6:
+            if k > 3:
                 return
-            elif k <= 6:
-                paths.append(arr + [0] * (6 - len(arr)))
+            elif k <= 3:
+                paths.append(arr + [0] * (3 - len(arr)))
                 generate(k + 1, arr + [1]), generate(k + 1, arr + [2])
 
         generate(0, [])
