@@ -65,6 +65,7 @@ class GlueDataset(Dataset):
     ):
         self.args = args
         processor = glue_processors[args.task_name]()
+        self.label_list = processor.get_labels()
         self.output_mode = glue_output_modes[args.task_name]
         # Load data features from cache or dataset file
         cached_features_file = os.path.join(
@@ -147,3 +148,6 @@ class GlueDataset(Dataset):
 
     def set_index(self, index):
         self.current_idx = index
+    
+    def get_labels(self):
+        return self.label_list

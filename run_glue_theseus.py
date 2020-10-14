@@ -272,7 +272,8 @@ def main():
 
     # assert model_args.train_early_exit ^ model_args.train_agent, "Two stage can only train agent or early exit"
     if training_args.do_train:
-        model.bert.encoder.init_agent_pooler(model.bert.pooler)  # init agent pooler
+        logger.info("POOLER NOT INTIALIZED")
+        # model.bert.encoder.init_agent_pooler(model.bert.pooler)  # init agent pooler
 
     if model_args.train_early_exit:
         # if second stage, the early exit is already trained
@@ -328,7 +329,7 @@ def main():
         model.bert.encoder.cl_idx = model_args.cl_idx
 
     scc_n_layer = model.bert.encoder.scc_n_layer
-    if training_args.do_train and not model_args.switch_mode:
+    if (training_args.do_train and not model_args.switch_mode):
         model.bert.encoder.scc_layer = nn.ModuleList(
             [deepcopy(model.bert.encoder.layer[ix]) for ix in range(scc_n_layer)])
 
@@ -491,9 +492,10 @@ def main():
 
         for test_dataset in test_datasets:
             predictions = trainer.predict(test_dataset=test_dataset).predictions
+            logits = predictions 
             if output_mode == "classification":
                 predictions = np.argmax(predictions, axis=1)
-
+            
             output_test_file = os.path.join(
                 training_args.output_dir, f"test_results_{test_dataset.args.task_name}.txt"
             )
@@ -506,7 +508,7 @@ def main():
                             writer.write("%d\t%3.3f\n" % (index, item))
                         else:
                             item = test_dataset.get_labels()[item]
-                            writer.write("%d\t%s\n" % (index, item))
+                            writer.write("%d\t%s\t%s\n" % (index, item, str(logits[index])))
     return eval_results
 
 
