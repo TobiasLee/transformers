@@ -140,7 +140,7 @@ class BertEncoder(nn.Module):
         self.output_attentions = config.output_attentions
         self.output_hidden_states = config.output_hidden_states
         self.layer = nn.ModuleList([BertLayer(config) for _ in range(self.prd_n_layer)])
-        self.small_layer_num = [6, 4, 3, 2, 1]  # we try to distill small models with different layers
+        self.small_layer_num = [6, 4, 2] # , 4, 3, 2, 1]  # we try to distill small models with different layers
         self.scc_layers = nn.ModuleList(
             [
                 nn.ModuleList(
@@ -158,7 +158,7 @@ class BertEncoder(nn.Module):
         self.bernoulli = Bernoulli(torch.tensor([replacing_rate]))
 
     def set_small_model_idx(self, index):  # decide which small mode to use
-        assert 0 <= index < len(
+        assert -1 <= index < len(
             self.small_layer_num), "index is supposed to be in range[0, len(small_models)), current is  %d" % index
         self.small_model_idx = index
 
@@ -177,7 +177,10 @@ class BertEncoder(nn.Module):
                         inference_layers.append(self.layer[i * compression_ratio + offset])
 
         else:  # inference with the selected compressed model
-            inference_layers = self.scc_layers[self.small_model_idx]  # select a small model for infernce
+            if self.small_model_idx == -1:
+                inference_layers = self.layer 
+            else:
+                inference_layers = self.scc_layers[self.small_model_idx]  # select a small model for infernce
 
         for i, layer_module in enumerate(inference_layers):
             if self.output_hidden_states:
