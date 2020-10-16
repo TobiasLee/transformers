@@ -405,6 +405,10 @@ class BertEncoder(nn.Module):
         self.output_attentions = config.output_attentions
         self.output_hidden_states = config.output_hidden_states
         self.layer = nn.ModuleList([BertLayer(config) for _ in range(config.num_hidden_layers)])
+        self.layer_limit = config.num_hidden_layers
+
+    def set_layer_limit(self, limit):
+        self.layer_limit = limit
 
     def forward(
         self,
@@ -417,7 +421,7 @@ class BertEncoder(nn.Module):
     ):
         all_hidden_states = ()
         all_attentions = ()
-        for i, layer_module in enumerate(self.layer):
+        for i, layer_module in enumerate(self.layer[:self.layer_limit]):
             # print(i)
             if self.output_hidden_states:
                 all_hidden_states = all_hidden_states + (hidden_states,)
