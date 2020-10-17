@@ -62,6 +62,9 @@ class ModelArguments:
     layer_limit: Optional[int] = field(
         default=12, metadata={"help": "BERT-NL layer model "}
     )
+    skip_layer: Optional[bool] = field(
+        default=False, metadata={"help": "BERT-Skip NL layer model"}
+    )
 
 
 def main():
@@ -164,6 +167,15 @@ def main():
     logger.info("Set BERT layer to %d" % model_args.layer_limit)
     model.bert.encoder.set_layer_limit(model_args.layer_limit)
     
+    if model_args.skip_layer:
+        model_layer_list = {
+            "2": [0, 11],  # first and last layer
+            "3": [0, 5, 11],
+            "4": [0, 4, 8, 11],
+            "6": [0, 3, 5, 7, 9, 11]
+        }
+        logger.info("Select layer as: %s", str(model_layer_list[str(model_args.layer_limit)]))
+        model.bert.encoder.set_part_layer(model_layer_list[str(model_args.layer_limit)])
     # Initialize our Trainer
     trainer = Trainer(
         model=model,
