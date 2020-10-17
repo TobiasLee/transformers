@@ -161,9 +161,9 @@ def main():
             return glue_compute_metrics(task_name, preds, p.label_ids)
 
         return compute_metrics_fn
-
+    logger.info("Set BERT layer to %d" % model_args.layer_limit)
     model.bert.encoder.set_layer_limit(model_args.layer_limit)
-
+    
     # Initialize our Trainer
     trainer = Trainer(
         model=model,
