@@ -408,7 +408,7 @@ class BertEncoder(nn.Module):
     def set_layer_limit(self, limit):
         self.layer_limit = limit
 
-    def set_select_layer(self, layer_num_list):
+    def set_part_layer(self, layer_num_list):
         self.part_layer = [self.layer[k] for k in layer_num_list]
         self.layer_limit = len(layer_num_list)
 
