@@ -50,6 +50,9 @@ class ModelArguments:
     model_name_or_path: str = field(
         metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models"}
     )
+    skip_layer: bool = field(
+        default=False, metadata={"help": "BERT-Skip NL layer model"}
+    )
     config_name: Optional[str] = field(
         default=None, metadata={"help": "Pretrained config name or path if not the same as model_name"}
     )
@@ -62,9 +65,7 @@ class ModelArguments:
     layer_limit: Optional[int] = field(
         default=12, metadata={"help": "BERT-NL layer model "}
     )
-    skip_layer: Optional[bool] = field(
-        default=False, metadata={"help": "BERT-Skip NL layer model"}
-    )
+
 
 
 def main():
@@ -164,18 +165,20 @@ def main():
             return glue_compute_metrics(task_name, preds, p.label_ids)
 
         return compute_metrics_fn
+    
     logger.info("Set BERT layer to %d" % model_args.layer_limit)
     model.bert.encoder.set_layer_limit(model_args.layer_limit)
-    
     if model_args.skip_layer:
         model_layer_list = {
             "2": [0, 11],  # first and last layer
             "3": [0, 5, 11],
             "4": [0, 4, 8, 11],
-            "6": [0, 3, 5, 7, 9, 11]
+            "6": [0, 3, 5, 7, 9, 11],
+            "8": [0, 1, 2, 4, 6, 8, 10, 11]
         }
         logger.info("Select layer as: %s", str(model_layer_list[str(model_args.layer_limit)]))
         model.bert.encoder.set_part_layer(model_layer_list[str(model_args.layer_limit)])
+    
     # Initialize our Trainer
     trainer = Trainer(
         model=model,

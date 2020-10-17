@@ -409,7 +409,7 @@ class BertEncoder(nn.Module):
         self.layer_limit = limit
 
     def set_part_layer(self, layer_num_list):
-        self.part_layer = [self.layer[k] for k in layer_num_list]
+        self.part_layer =  layer_num_list
         self.layer_limit = len(layer_num_list)
 
     def forward(
@@ -424,8 +424,9 @@ class BertEncoder(nn.Module):
         all_hidden_states = ()
         all_attentions = ()
 
-        layer = self.layer if self.part_layer is None else self.part_layer
-        for i, layer_module in enumerate(layer[:self.layer_limit]):
+        for i in range(self.layer_limit):
+            layer_module = self.layer[i] if self.part_layer is None else self.layer[self.part_layer[i]] 
+
             # print(i)
             if self.output_hidden_states:
                 all_hidden_states = all_hidden_states + (hidden_states,)
