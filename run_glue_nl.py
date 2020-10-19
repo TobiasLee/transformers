@@ -65,6 +65,10 @@ class ModelArguments:
     layer_limit: Optional[int] = field(
         default=12, metadata={"help": "BERT-NL layer model "}
     )
+    only_train_classifier: bool = field(
+        default=False, metadata={"help": "only optimize the classifier for eliminating the task-specific "
+                                         "representation adaption"}
+    )
 
 
 
@@ -178,7 +182,32 @@ def main():
         }
         logger.info("Select layer as: %s", str(model_layer_list[str(model_args.layer_limit)]))
         model.bert.encoder.set_part_layer(model_layer_list[str(model_args.layer_limit)])
-    
+
+    optimizer_grouped_parameters = None
+    if model_args.only_train_classifier:
+        no_decay = ["bias", "LayerNorm.weight"]
+        # train classifier and pooler
+        optimizer_grouped_parameters = [
+                {
+                    "params": [p for n, p in model.bert.classifier.named_parameters() if not any(nd in n for nd in no_decay)],
+                    "weight_decay": training_args.weight_decay,
+                },
+                {
+                    "params": [p for n, p in model.bert.encoder.pooler.named_parameters() if
+                               not any(nd in n for nd in no_decay)],
+                    "weight_decay": training_args.weight_decay,
+                },
+                {
+                    "params": [p for n, p in model.bert.encoder.pooler.named_parameters() if any(nd in n for nd in no_decay)],
+                    "weight_decay": 0.0,
+                },
+                {
+                    "params": [p for n, p in model.bert.classifier.named_parameters() if
+                               any(nd in n for nd in no_decay)],
+                    "weight_decay": 0.0,
+                },
+            ]
+
     # Initialize our Trainer
     trainer = Trainer(
         model=model,
@@ -186,6 +215,7 @@ def main():
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         compute_metrics=build_compute_metrics_fn(data_args.task_name),
+        optimizer_grouped_parameters=optimizer_grouped_parameters
     )
 
     # Training
