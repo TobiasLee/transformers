@@ -140,7 +140,7 @@ def main():
         model.bert.multiple_encoder.shallow_layers = nn.ModuleList(
             [
                 nn.ModuleList(
-                    [deepcopy(model.bert.encoder.layer[ix] for ix in range(k))]
+                    [deepcopy(model.bert.encoder.layer[ix]) for ix in range(k)]
                 ) for k in small_layer_n_list
             ]
         )
@@ -181,7 +181,6 @@ def main():
 
         return compute_metrics_fn
 
-    model.set_small_number_idx(model_args.small_model_index)
 
     # Initialize our Trainer
     trainer = Trainer(
@@ -218,7 +217,7 @@ def main():
 
         for eval_dataset in eval_datasets:
             trainer.compute_metrics = build_compute_metrics_fn(eval_dataset.args.task_name)
-            eval_result = trainer.evaluate(eval_dataset=eval_dataset, require_paths=model_args.logging_paths)
+            eval_result = trainer.evaluate(eval_dataset=eval_dataset)
             output_eval_file = os.path.join(
                 training_args.output_dir, f"eval_results_{eval_dataset.args.task_name}.txt"
             )

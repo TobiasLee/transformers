@@ -398,6 +398,7 @@ class BertLayer(nn.Module):
 
 class BertClassificationHead(nn.Module):
     def __init__(self, config):
+        super().__init__() 
         self.pooler = BertPooler(config)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
         self.classifier = nn.Linear(config.hidden_size, config.num_labels)
@@ -469,6 +470,7 @@ class BertPooler(nn.Module):
 
 class AdaBertEncoder(nn.Module):
     def __init__(self, config, original_encoder_layer, small_layer_num):
+        super().__init__()
         self.original_layer = original_encoder_layer
         self.small_layer_num = small_layer_num
         self.shallow_layers = nn.ModuleList([
@@ -519,7 +521,7 @@ class AdaBertEncoder(nn.Module):
 
         if self.training:
             if arch_probs is None:
-                arch_probs = torch.ones((bsz, len(self.classifiers)), dtype=hidden_states.dtype, device=device)
+                arch_probs = torch.ones((bsz, len(self.classifiers), 1), dtype=hidden_states.dtype, device=device)
                 # soft-addition, indeed, it looks like an ensemble
             all_logits = torch.stack(all_logits, dim=1)  # bsz, num_models, num_labels
             # arch_probs : bsz, num_models
