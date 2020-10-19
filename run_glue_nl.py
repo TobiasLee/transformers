@@ -170,7 +170,7 @@ def main():
     model.bert.encoder.set_layer_limit(model_args.layer_limit)
     if model_args.skip_layer:
         model_layer_list = {
-            "2": [0, 11],  # first and last layer
+            "2": [6, 11],  # first and last layer
             "3": [0, 5, 11],
             "4": [0, 4, 8, 11],
             "6": [0, 3, 5, 7, 9, 11],
@@ -206,11 +206,11 @@ def main():
 
         # Loop to handle MNLI double evaluation (matched, mis-matched)
         eval_datasets = [eval_dataset]
-        if data_args.task_name == "mnli":
-            mnli_mm_data_args = dataclasses.replace(data_args, task_name="mnli-mm")
-            eval_datasets.append(
-                GlueDataset(mnli_mm_data_args, tokenizer=tokenizer, mode="dev", cache_dir=model_args.cache_dir)
-            )
+        #if data_args.task_name == "mnli":
+        #    mnli_mm_data_args = dataclasses.replace(data_args, task_name="mnli-mm")
+        #    eval_datasets.append(
+        #        GlueDataset(mnli_mm_data_args, tokenizer=tokenizer, mode="dev", cache_dir=model_args.cache_dir)
+        #    )
 
         for eval_dataset in eval_datasets:
             trainer.compute_metrics = build_compute_metrics_fn(eval_dataset.args.task_name)
