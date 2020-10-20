@@ -60,6 +60,9 @@ class ModelArguments:
     cache_dir: Optional[str] = field(
         default=None, metadata={"help": "Where do you want to store the pretrained models downloaded from s3"}
     )
+    model_infer_idx: Optional[int] = field(
+        default=0, metadata={"help": "set inference model for evaluating"}
+    )
 
 
 def main():
@@ -134,8 +137,7 @@ def main():
         cache_dir=model_args.cache_dir
     )
 
-
-    small_layer_n_list = model.bert.multiple_encoder.small_layer_num # [6, 2]
+    small_layer_n_list = model.bert.multiple_encoder.small_layer_num  # [6, 2]
     if training_args.do_train:  # do_train, copy the first layer for now
         model.bert.multiple_encoder.shallow_layers = nn.ModuleList(
             [
@@ -181,7 +183,6 @@ def main():
 
         return compute_metrics_fn
 
-
     # Initialize our Trainer
     trainer = Trainer(
         model=model,
@@ -201,12 +202,13 @@ def main():
         if trainer.is_world_master():
             tokenizer.save_pretrained(training_args.output_dir)
 
-
     # Evaluation
     eval_results = {}
     if training_args.do_eval:
         logger.info("*** Evaluate ***")
-
+        layer_n_list = [config.num_hidden_layers]  + small_layer_n_list
+        logger.info("Setting inference model to %d Layers" % layer_n_list[model_args.model_infer_idx])
+        model.bert.multiple_encoder.set_infer_model_idx(model_args.model_infer_idx)
         # Loop to handle MNLI double evaluation (matched, mis-matched)
         eval_datasets = [eval_dataset]
         # if data_args.task_name == "mnli":

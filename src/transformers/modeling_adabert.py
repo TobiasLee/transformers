@@ -398,7 +398,7 @@ class BertLayer(nn.Module):
 
 class BertClassificationHead(nn.Module):
     def __init__(self, config):
-        super().__init__() 
+        super().__init__()
         self.pooler = BertPooler(config)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
         self.classifier = nn.Linear(config.hidden_size, config.num_labels)
@@ -480,6 +480,7 @@ class AdaBertEncoder(nn.Module):
         self.classifiers = nn.ModuleList([BertClassificationHead(config) for _ in range(len(small_layer_num) + 1)])
         self.output_attentions = config.output_attentions
         self.output_hidden_states = config.output_hidden_states
+        self.infer_model_idx = 0
 
     def init_pooler_weights(self, pooler: BertPooler):
         # init pooler from pre-trained models
@@ -487,6 +488,11 @@ class AdaBertEncoder(nn.Module):
         for classifier in self.classifiers:
             for name, param in classifier.pooler.state_dict().items():
                 param.copy_(loaded_model[name])
+
+    def set_infer_model_idx(self, idx):
+        assert 0 <= idx < len(self.small_layer_num), "Model index is supposed to be in range [0, %)" % len(
+            self.small_layer_num)
+        self.infer_model_idx = idx
 
     def forward(self,
                 hidden_states,
@@ -527,7 +533,7 @@ class AdaBertEncoder(nn.Module):
             # arch_probs : bsz, num_models
             final_logit = torch.sum(all_logits * arch_probs, dim=1)  # bsz, num_labels
         else:
-            final_logit = all_logits[0]  # default using the largest model for infenece
+            final_logit = all_logits[self.infer_model_idx]  # default using the largest model for infenece
         # hard selection for inference: pass
         outputs = (final_logit, all_hidden_states, all_attentions)
         return outputs
