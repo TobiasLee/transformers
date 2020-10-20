@@ -148,15 +148,15 @@ def main():
         )
         model.bert.multiple_encoder.init_pooler_weights(model.bert.pooler)
 
-    # no_decay = ['bias', 'LayerNorm.weight']
-    # optimizer_grouped_parameters = []
+    no_decay = ['bias', 'LayerNorm.weight']
+    optimizer_grouped_parameters = []
     # add param for only training agent afterwards
-    # optimizer_grouped_parameters.extend([
-    #     {'params': [p for n, p in model.bert.mutiple_encoder.named_parameters() if
-    #                 not any(nd in n for nd in no_decay)], 'weight_decay': training_args.weight_decay},
-    #     {'params': [p for n, p in model.bert.mutiple_encoder.named_parameters() if
-    #                 any(nd in n for nd in no_decay)], 'weight_decay': 0.0},
-    # ])
+    optimizer_grouped_parameters.extend([
+        {'params': [p for n, p in model.bert.mutiple_encoder.named_parameters() if
+                    not any(nd in n for nd in no_decay)], 'weight_decay': training_args.weight_decay},
+        {'params': [p for n, p in model.bert.mutiple_encoder.named_parameters() if
+                    any(nd in n for nd in no_decay)], 'weight_decay': 0.0},
+    ])
 
     # Get datasets
     train_dataset = (
@@ -191,6 +191,7 @@ def main():
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         compute_metrics=build_compute_metrics_fn(data_args.task_name),
+        optimizer_grouped_parameters=optimizer_grouped_parameters
     )
     # Training
     if training_args.do_train:
