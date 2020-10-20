@@ -490,8 +490,7 @@ class AdaBertEncoder(nn.Module):
                 param.copy_(loaded_model[name])
 
     def set_infer_model_idx(self, idx):
-        assert 0 <= idx < len(self.small_layer_num), "Model index is supposed to be in range [0, %)" % len(
-            self.small_layer_num)
+        assert 0 <= idx <= len(self.small_layer_num), "Model index is supposed to be in range [0, %d]" % len(self.small_layer_num)
         self.infer_model_idx = idx
 
     def forward(self,
@@ -734,6 +733,7 @@ class BertModel(BertPreTrainedModel):
         self.multiple_encoder = AdaBertEncoder(config,
                                                original_encoder_layer=self.encoder.layer,
                                                small_layer_num=[6, 2])
+        self.pooler = BertPooler(config)
 
         self.init_weights()
 
