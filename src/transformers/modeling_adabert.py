@@ -539,6 +539,23 @@ class AdaBertEncoder(nn.Module):
         return outputs
 
 
+class AdaSwitchAgent(nn.Module):
+    def __init__(self, config, arch_num, temperature=1e2):
+        super(AdaSwitchAgent, self).__init__()
+        self.config = config
+        self.pooler = BertPooler(config)
+        self.arch_selector = nn.Linear(config.hidden_size, arch_num)
+        self.act = nn.Softmax(dim=-1)
+        self.temperature = temperature
+
+    def forward(self, hidden_states):
+        # generate a arch probability for model selection
+        pooled_hidden = self.pooler(hidden_states)
+        arch_logit = self.arch_selector(pooled_hidden)
+        arch_prob = self.act(arch_logit / self.temperature)
+        return arch_prob
+
+
 class BertPredictionHeadTransform(nn.Module):
     def __init__(self, config):
         super().__init__()
