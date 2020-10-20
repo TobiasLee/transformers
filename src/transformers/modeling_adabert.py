@@ -525,16 +525,15 @@ class AdaBertEncoder(nn.Module):
         all_logits = [classifier(hiddens) for classifier, hiddens in zip(self.classifiers, all_hiddens)]
 
         if self.training:
-            if arch_probs is None:
-                arch_probs = torch.ones((bsz, len(self.classifiers), 1), dtype=hidden_states.dtype, device=device)
-                # soft-addition, indeed, it looks like an ensemble
-            all_logits = torch.stack(all_logits, dim=1)  # bsz, num_models, num_labels
-            # arch_probs : bsz, num_models
-            final_logit = torch.sum(all_logits * arch_probs, dim=1)  # bsz, num_labels
+            # if arch_probs is None:
+            #     arch_probs = torch.ones((bsz, len(self.classifiers), 1), dtype=hidden_states.dtype, device=device)
+            # soft-addition, indeed, it looks like an ensemble, arch_probs : bsz, num_models, 1
+            # final_logit = torch.sum(all_logits * arch_probs, dim=1)  # bsz, num_labels  add is not good for training independent classifiers
+            final_logits = all_logits
         else:
-            final_logit = all_logits[self.infer_model_idx]  # default using the largest model for infenece
+            final_logits = [all_logits[self.infer_model_idx]]  # default using the largest model for infenece
         # hard selection for inference: pass
-        outputs = (final_logit, all_hidden_states, all_attentions)
+        outputs = (final_logits, all_hidden_states, all_attentions)
         return outputs
 
 
@@ -1281,17 +1280,26 @@ class MultipleBertForSequenceClassification(BertPreTrainedModel):
             mlp_mask=mlp_mask
         )
 
-        logits = outputs[0]
-        outputs = (logits,) + outputs[1:]  # add hidden states and attention if they are here
+        multiple_logits = outputs[0]
+        outputs = (multiple_logits[0],) + outputs[1:]  # add hidden states and attention if they are here
 
         if labels is not None:
+            loss = None
             if self.num_labels == 1:
                 #  We are doing regression
                 loss_fct = MSELoss()
-                loss = loss_fct(logits.view(-1), labels.view(-1))
+                for logits in multiple_logits:
+                    if loss is None:
+                        loss = loss_fct(logits.view(-1), labels.view(-1))
+                    else:
+                        loss += loss_fct(logits.view(-1), labels.view(-1))
             else:
                 loss_fct = CrossEntropyLoss()
-                loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
+                for logits in multiple_logits:
+                    if loss is None:
+                        loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
+                    else:
+                        loss += loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
             outputs = (loss,) + outputs
 
         return outputs  # (loss), logits, (hidden_states), (attentions)
