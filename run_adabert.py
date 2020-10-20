@@ -146,6 +146,7 @@ def main():
                 ) for k in small_layer_n_list
             ]
         )
+        model.bert.multiple_encoder.init_pooler_weights(model.bert.pooler)
 
     # no_decay = ['bias', 'LayerNorm.weight']
     # optimizer_grouped_parameters = []
