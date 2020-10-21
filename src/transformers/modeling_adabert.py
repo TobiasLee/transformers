@@ -526,7 +526,7 @@ class AdaBertEncoder(nn.Module):
 
         all_hidden_states = ()
         all_attentions = ()
-        paths = ()
+        paths = torch.zeros((len(self.small_layer_num) + 1 ))
 
         def _run_encoder_layer_forward(encoder_layers):
             inner_hidden = hidden_states
@@ -574,7 +574,7 @@ class AdaBertEncoder(nn.Module):
                     else:
                         cur_entropy = entropy(logit[left_idx])  # num_left
                         exit_idx = left_idx[cur_entropy < self.ent_threshold]
-                        paths = paths + ((i, len(exit_idx)), )  # add exit idx and num examples
+                        paths[i] += len(exit_idx) # add exit idx and num examples
                         logit_idx.append(exit_idx)  # append idx already exited
                         finalized_logit = logit[exit_idx]
                         final_logits.append(finalized_logit)
