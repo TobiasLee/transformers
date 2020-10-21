@@ -808,7 +808,7 @@ class Trainer:
         eval_classification_reward: List[float] = []
         eval_path_reward: List[float] = []
         eval_path_prob: List = []
-        eval_path_dist = defaultdict(0)
+        eval_path_dist = defaultdict(lambda: 0)
         preds: torch.Tensor = None
         label_ids: torch.Tensor = None
         learned_head_masks: torch.Tensor = None
