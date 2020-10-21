@@ -523,7 +523,8 @@ class AdaBertEncoder(nn.Module):
         # make prediction based on the hiddens
         #  len: num_models,  bsz x num_labels
         all_logits = [classifier(hiddens) for classifier, hiddens in zip(self.classifiers, all_hiddens)]
-
+        # print("num clf:", len(self.classifiers))
+        # print(len(all_logits))
         if self.training:
             # if arch_probs is None:
             #     arch_probs = torch.ones((bsz, len(self.classifiers), 1), dtype=hidden_states.dtype, device=device)
@@ -1282,7 +1283,7 @@ class MultipleBertForSequenceClassification(BertPreTrainedModel):
 
         multiple_logits = outputs[0]
         outputs = (multiple_logits[0],) + outputs[1:]  # add hidden states and attention if they are here
-
+        
         if labels is not None:
             loss = None
             if self.num_labels == 1:

@@ -148,15 +148,15 @@ def main():
         )
         model.bert.multiple_encoder.init_pooler_weights(model.bert.pooler)
 
-    no_decay = ['bias', 'LayerNorm.weight']
-    optimizer_grouped_parameters = []
-    # add param for only training agent afterwards
-    optimizer_grouped_parameters.extend([
-        {'params': [p for n, p in model.bert.mutiple_encoder.named_parameters() if
-                    not any(nd in n for nd in no_decay)], 'weight_decay': training_args.weight_decay},
-        {'params': [p for n, p in model.bert.mutiple_encoder.named_parameters() if
-                    any(nd in n for nd in no_decay)], 'weight_decay': 0.0},
-    ])
+    # no_decay = ['bias', 'LayerNorm.weight']
+    optimizer_grouped_parameters = [] 
+    #  add param for only training agent afterwards
+    # optimizer_grouped_parameters.extend([
+    #    {'params': [p for n, p in model.bert.multiple_encoder.named_parameters() if
+    #                not any(nd in n for nd in no_decay)], 'weight_decay': training_args.weight_decay},
+    #    {'params': [p for n, p in model.bert.multiple_encoder.named_parameters() if
+    #                any(nd in n for nd in no_decay)], 'weight_decay': 0.0},
+    # ])
 
     # Get datasets
     train_dataset = (
@@ -191,7 +191,7 @@ def main():
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         compute_metrics=build_compute_metrics_fn(data_args.task_name),
-        optimizer_grouped_parameters=optimizer_grouped_parameters
+        optimizer_grouped_parameters=optimizer_grouped_parameters if len(optimizer_grouped_parameters) > 0 else None 
     )
     # Training
     if training_args.do_train:
@@ -208,7 +208,7 @@ def main():
     eval_results = {}
     if training_args.do_eval:
         logger.info("*** Evaluate ***")
-        layer_n_list = [config.num_hidden_layers]  + small_layer_n_list
+        layer_n_list = [config.num_hidden_layers] + small_layer_n_list
         logger.info("Setting inference model to %d Layers" % layer_n_list[model_args.model_infer_idx])
         model.bert.multiple_encoder.set_infer_model_idx(model_args.model_infer_idx)
         # Loop to handle MNLI double evaluation (matched, mis-matched)
