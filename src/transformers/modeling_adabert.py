@@ -570,16 +570,14 @@ class AdaBertEncoder(nn.Module):
                         logit_idx.append(left_idx)
                     else:
                         cur_entropy = entropy(logit[left_idx])  # num_left
-                        exit_idx = cur_entropy < self.ent_threshold
-                        logit_idx.append(left_idx[exit_idx])  # append idx alreal`
-                        finalized_logit = cur_entropy[exit_idx]
+                        exit_idx = left_idx[cur_entropy < self.ent_threshold]
+                        logit_idx.append(exit_idx)  # append idx already exited 
+                        finalized_logit = logit[exit_idx]
                         final_logits.append(finalized_logit)
                         left_idx = left_idx[cur_entropy >= self.ent_threshold]
                 final_logits = torch.cat(final_logits, dim=0)  # cat logits together
                 sorted_idx, order = torch.sort(torch.cat(logit_idx, dim=0))
                 final_logits = [final_logits[order]]  # re-order it back
-
-            return final_logits
 
             # hard selection for inference: pass
         outputs = (final_logits, all_hidden_states, all_attentions)
