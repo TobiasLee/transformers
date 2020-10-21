@@ -781,7 +781,7 @@ class Trainer:
 
     def _prediction_loop(
             self, dataloader: DataLoader, description: str, prediction_loss_only: Optional[bool] = None, head_mask=None,
-            require_head_masks=False, require_paths=False, num_parts=6, require_exit_dist=False
+            require_head_masks=False, require_paths=False, num_parts=6, require_exit_dist=False, model_layer_num=[2, 6, 12]
     ):
         """
         Prediction/evaluation loop, shared by `evaluate()` and `predict()`.
@@ -912,7 +912,15 @@ class Trainer:
             metrics["eval_loss"] = np.mean(eval_losses)
         metrics["eval_time"] = end - start
         metrics["expected_saving"] = expected_saving
-        print(eval_path_dist)
+        if len(eval_path_dist.keys()) > 0:
+            layer_cnt = 0
+            layer_sum = 0
+            example_num = 0
+            for l_num in model_layer_num:
+                layer_sum += l_num
+                layer_cnt += layer_sum * eval_path_dist[l_num]
+                example_num += eval_path_dist[l_num]
+            metrics["eval_new_saving"] = 1 - layer_cnt / ( example_num * model_layer_num[-1])
         if len(eval_classification_reward) > 0:
             metrics["eval_classification_reward"] = np.mean(eval_classification_reward)
         if len(eval_path_reward) > 0:
