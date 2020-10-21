@@ -8,6 +8,7 @@ import shutil
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
+from collections import defaultdict
 import time
 
 import numpy as np
@@ -734,7 +735,8 @@ class Trainer:
             prediction_loss_only: Optional[bool] = None,
             head_mask=None,
             require_head_masks=False,
-            require_paths=False
+            require_paths=False,
+            require_exit_dist=False
     ):
         """
         Run evaluation and return metrics.
@@ -753,7 +755,8 @@ class Trainer:
         eval_dataloader = self.get_eval_dataloader(eval_dataset)
         output = self._prediction_loop(eval_dataloader, description="Evaluation",
                                        head_mask=head_mask,
-                                       require_paths=require_paths)
+                                       require_paths=require_paths,
+                                       require_exit_dist=require_exit_dist)
 
         self._log(output.metrics)
 
@@ -778,7 +781,7 @@ class Trainer:
 
     def _prediction_loop(
             self, dataloader: DataLoader, description: str, prediction_loss_only: Optional[bool] = None, head_mask=None,
-            require_head_masks=False, require_paths=False, num_parts=6
+            require_head_masks=False, require_paths=False, num_parts=6, require_exit_dist=False
     ):
         """
         Prediction/evaluation loop, shared by `evaluate()` and `predict()`.
@@ -805,6 +808,7 @@ class Trainer:
         eval_classification_reward: List[float] = []
         eval_path_reward: List[float] = []
         eval_path_prob: List = []
+        eval_path_dist = defaultdict(0)
         preds: torch.Tensor = None
         label_ids: torch.Tensor = None
         learned_head_masks: torch.Tensor = None
@@ -839,6 +843,11 @@ class Trainer:
                     eval_classification_reward += [performance_reward.mean().item()]
                     eval_path_reward += [path_reward.mean().item()]
                     eval_path_prob += [path_prob.mean().item()]
+
+                if require_exit_dist:
+                    dist = outputs[-1]
+                    for idx, num in dist:
+                        eval_path_dist[idx] += num
                 # if require_head_masks:
                 #     head_masks = outputs[-1] # the last one， tuple: (Tensor(bsz,  num_attention_heads, seq_len, 1), )
                 #     head_masks = torch.stack(head_masks).squeeze() # (12, bsz, num_heads, seq_len, 1)
@@ -903,6 +912,7 @@ class Trainer:
             metrics["eval_loss"] = np.mean(eval_losses)
         metrics["eval_time"] = end - start
         metrics["expected_saving"] = expected_saving
+        print(eval_path_dist)
         if len(eval_classification_reward) > 0:
             metrics["eval_classification_reward"] = np.mean(eval_classification_reward)
         if len(eval_path_reward) > 0:

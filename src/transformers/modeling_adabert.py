@@ -522,8 +522,11 @@ class AdaBertEncoder(nn.Module):
         bsz = hidden_states.size()[0]
         device = hidden_states.device
 
+
+
         all_hidden_states = ()
         all_attentions = ()
+        paths = ()
 
         def _run_encoder_layer_forward(encoder_layers):
             inner_hidden = hidden_states
@@ -544,6 +547,7 @@ class AdaBertEncoder(nn.Module):
         all_logits = [classifier(hiddens) for classifier, hiddens in zip(self.classifiers, all_hiddens)]
         # print("num clf:", len(self.classifiers))
         # print(len(all_logits))
+        outputs = (all_hiddens, all_attentions, )
         if self.training:
             # if arch_probs is None:
             #     arch_probs = torch.ones((bsz, len(self.classifiers), 1), dtype=hidden_states.dtype, device=device)
@@ -564,23 +568,25 @@ class AdaBertEncoder(nn.Module):
                     # logit is a full-batch
                     if len(left_idx) == 0:  # no instances left
                         break
-
                     if i == len(self.small_layer_num):  # final, exits all left instances here
                         final_logits.append(logit[left_idx])
                         logit_idx.append(left_idx)
                     else:
                         cur_entropy = entropy(logit[left_idx])  # num_left
                         exit_idx = left_idx[cur_entropy < self.ent_threshold]
-                        logit_idx.append(exit_idx)  # append idx already exited 
+                        paths = paths + ((i, len(exit_idx)), )  # add exit idx and num examples
+                        logit_idx.append(exit_idx)  # append idx already exited
                         finalized_logit = logit[exit_idx]
                         final_logits.append(finalized_logit)
                         left_idx = left_idx[cur_entropy >= self.ent_threshold]
                 final_logits = torch.cat(final_logits, dim=0)  # cat logits together
                 sorted_idx, order = torch.sort(torch.cat(logit_idx, dim=0))
                 final_logits = [final_logits[order]]  # re-order it back
-
+                outputs = outputs + (paths, )
+            else:
+                raise ValueError("Unsupported infer mode now %s" % self.infer_mode)
+        outputs = (final_logits, ) + outputs
             # hard selection for inference: pass
-        outputs = (final_logits, all_hidden_states, all_attentions)
         return outputs
 
 
