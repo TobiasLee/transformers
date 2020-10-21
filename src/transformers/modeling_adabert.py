@@ -468,6 +468,14 @@ class BertPooler(nn.Module):
         return pooled_output
 
 
+def entropy(x):
+    # x: torch.Tensor, logits BEFORE softmax
+    exp_x = torch.exp(x)
+    A = torch.sum(exp_x, dim=1)  # sum of exp(x_i)
+    B = torch.sum(x * exp_x, dim=1)  # sum of x_i * exp(x_i)
+    return torch.log(A) - B / A
+
+
 class AdaBertEncoder(nn.Module):
     def __init__(self, config, original_encoder_layer, small_layer_num):
         super().__init__()
@@ -481,6 +489,8 @@ class AdaBertEncoder(nn.Module):
         self.output_attentions = config.output_attentions
         self.output_hidden_states = config.output_hidden_states
         self.infer_model_idx = 0
+        self.infer_mode = "fix"
+        self.ent_threshold = -1
 
     def init_pooler_weights(self, pooler: BertPooler):
         # init pooler from pre-trained models
@@ -490,8 +500,16 @@ class AdaBertEncoder(nn.Module):
                 param.copy_(loaded_model[name])
 
     def set_infer_model_idx(self, idx):
-        assert 0 <= idx <= len(self.small_layer_num), "Model index is supposed to be in range [0, %d]" % len(self.small_layer_num)
+        assert 0 <= idx <= len(self.small_layer_num), "Model index is supposed to be in range [0, %d]" % len(
+            self.small_layer_num)
         self.infer_model_idx = idx
+
+    def set_infer_mode(self, mode):
+        assert mode in ["fix", "refine", "auto"]
+        self.infer_mode = mode
+
+    def set_entropy_threshold(self, theshold):
+        self.ent_threshold = theshold
 
     def forward(self,
                 hidden_states,
@@ -515,6 +533,7 @@ class AdaBertEncoder(nn.Module):
                 inner_hidden = inner_outputs[0]
             return inner_hidden
 
+        # multiple forward together
         all_hiddens = [_run_encoder_layer_forward(self.original_layer)]
         all_hiddens.extend(
             [_run_encoder_layer_forward(shallow_layer)
@@ -530,10 +549,39 @@ class AdaBertEncoder(nn.Module):
             #     arch_probs = torch.ones((bsz, len(self.classifiers), 1), dtype=hidden_states.dtype, device=device)
             # soft-addition, indeed, it looks like an ensemble, arch_probs : bsz, num_models, 1
             # final_logit = torch.sum(all_logits * arch_probs, dim=1)  # bsz, num_labels  add is not good for training independent classifiers
-            final_logits = all_logits
-        else:
-            final_logits = [all_logits[self.infer_model_idx]]  # default using the largest model for infenece
-        # hard selection for inference: pass
+            final_logits = all_logits  # return all logits for loss
+        else:  # inference with different strategy
+            #  directly using set model for evaluation
+            if self.infer_mode == "fix":
+                final_logits = [all_logits[self.infer_model_idx]]  # default using the largest model for inference
+            elif self.infer_mode == "refine":  # incrementally select models
+                left_idx = torch.arange(bsz, device=device)
+                final_logits = []
+                logit_idx = []
+                # according to each classification confidence for juding the exit
+
+                for i, logit in enumerate(all_logits[::-1]):  # from shallow to large
+                    # logit is a full-batch
+                    if len(left_idx) == 0:  # no instances left
+                        break
+
+                    if i == len(self.small_layer_num):  # final, exits all left instances here
+                        final_logits.append(logit[left_idx])
+                        logit_idx.append(left_idx)
+                    else:
+                        cur_entropy = entropy(logit[left_idx])  # num_left
+                        exit_idx = cur_entropy < self.ent_threshold
+                        logit_idx.append(left_idx[exit_idx])  # append idx alreal`
+                        finalized_logit = cur_entropy[exit_idx]
+                        final_logits.append(finalized_logit)
+                        left_idx = left_idx[cur_entropy >= self.ent_threshold]
+                final_logits = torch.cat(final_logits, dim=0)  # cat logits together
+                sorted_idx, order = torch.sort(torch.cat(logit_idx, dim=0))
+                final_logits = [final_logits[order]]  # re-order it back
+
+            return final_logits
+
+            # hard selection for inference: pass
         outputs = (final_logits, all_hidden_states, all_attentions)
         return outputs
 
