@@ -846,7 +846,7 @@ class Trainer:
 
                 if require_exit_dist:
                     dist = outputs[-1]
-                    for idx, num in dist:
+                    for idx, num in enumerate(dist.detach().cpu()):
                         eval_path_dist[idx] += num
                 # if require_head_masks:
                 #     head_masks = outputs[-1] # the last one， tuple: (Tensor(bsz,  num_attention_heads, seq_len, 1), )
