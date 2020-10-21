@@ -567,19 +567,17 @@ class AdaBertEncoder(nn.Module):
                     if i == len(self.small_layer_num):  # final, exits all left instances here
                         final_logits.append(logit[left_idx])
                         logit_idx.append(left_idx)
-
                     else:
-
                         cur_entropy = entropy(logit[left_idx])  # num_left
                         exit_idx = cur_entropy < self.ent_threshold
                         logit_idx.append(left_idx[exit_idx])  # append idx alreal`
                         finalized_logit = cur_entropy[exit_idx]
                         final_logits.append(finalized_logit)
                         left_idx = left_idx[cur_entropy >= self.ent_threshold]
-
                 final_logits = torch.cat(final_logits, dim=0)  # cat logits together
                 sorted_idx, order = torch.sort(torch.cat(logit_idx, dim=0))
-                final_logits = final_logits[order]  # re-order it back
+                final_logits = [final_logits[order]]  # re-order it back
+
             return final_logits
 
             # hard selection for inference: pass

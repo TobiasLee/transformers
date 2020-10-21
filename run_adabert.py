@@ -63,6 +63,12 @@ class ModelArguments:
     model_infer_idx: Optional[int] = field(
         default=0, metadata={"help": "set inference model for evaluating"}
     )
+    model_infer_mode: Optional[str] = field(
+        default='fix', metadata={"help": "set model inference mode, fix, refine, and auto"}
+    )
+    entropy_threshold: Optional[float] = field(
+        default=-1.0, metadata={"help": "entropy threshold used in the refine mode"}
+    )
 
 
 def main():
@@ -148,15 +154,19 @@ def main():
         )
         model.bert.multiple_encoder.init_pooler_weights(model.bert.pooler)
 
-    no_decay = ['bias', 'LayerNorm.weight']
+    # set inference args
+    model.bert.multiple_encoder.set_infer_mode(model_args.model_infer_mode)
+    model.bert.multiple_encoder.set_entropy_threshold(model_args.entropy_threshold)
+
+    # no_decay = ['bias', 'LayerNorm.weight']
     optimizer_grouped_parameters = []
-    # add param for only training agent afterwards
-    optimizer_grouped_parameters.extend([
-        {'params': [p for n, p in model.bert.mutiple_encoder.named_parameters() if
-                    not any(nd in n for nd in no_decay)], 'weight_decay': training_args.weight_decay},
-        {'params': [p for n, p in model.bert.mutiple_encoder.named_parameters() if
-                    any(nd in n for nd in no_decay)], 'weight_decay': 0.0},
-    ])
+    # # add param for only training agent afterwards
+    # optimizer_grouped_parameters.extend([
+    #     {'params': [p for n, p in model.bert.mutiple_encoder.named_parameters() if
+    #                 not any(nd in n for nd in no_decay)], 'weight_decay': training_args.weight_decay},
+    #     {'params': [p for n, p in model.bert.mutiple_encoder.named_parameters() if
+    #                 any(nd in n for nd in no_decay)], 'weight_decay': 0.0},
+    # ])
 
     # Get datasets
     train_dataset = (
@@ -191,7 +201,7 @@ def main():
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         compute_metrics=build_compute_metrics_fn(data_args.task_name),
-        optimizer_grouped_parameters=optimizer_grouped_parameters
+        optimizer_grouped_parameters=optimizer_grouped_parameters if len(optimizer_grouped_parameters) > 0 else None
     )
     # Training
     if training_args.do_train:
