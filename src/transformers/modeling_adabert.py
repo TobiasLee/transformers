@@ -526,8 +526,7 @@ class AdaBertEncoder(nn.Module):
 
         all_hidden_states = ()
         all_attentions = ()
-        paths = torch.zeros((len(self.small_layer_num) + 1 ))
-
+        paths = torch.zeros((len(self.small_layer_num) + 1 ), device=device)
         def _run_encoder_layer_forward(encoder_layers):
             inner_hidden = hidden_states
             for i, layer_module in enumerate(encoder_layers):

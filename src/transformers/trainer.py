@@ -845,8 +845,11 @@ class Trainer:
                     eval_path_prob += [path_prob.mean().item()]
 
                 if require_exit_dist:
-                    dist = outputs[-1]
-                    for idx, num in enumerate(dist.detach().cpu()):
+                    dist = outputs[-1] # tensor
+                    dist = dist.reshape(len(model_layer_num), -1)
+                    dist = np.sum(dist.detach().cpu().numpy(), axis=-1)
+                    for idx, num in enumerate(dist):
+                        print(idx)
                         eval_path_dist[idx] += num
                 # if require_head_masks:
                 #     head_masks = outputs[-1] # the last one， tuple: (Tensor(bsz,  num_attention_heads, seq_len, 1), )
@@ -916,11 +919,14 @@ class Trainer:
             layer_cnt = 0
             layer_sum = 0
             example_num = 0
-            for l_num in model_layer_num:
+            for idx, l_num in enumerate(model_layer_num) :
+                print("%d  examples exit at %d layer" % (eval_path_dist[idx], l_num ) ) 
                 layer_sum += l_num
-                layer_cnt += layer_sum * eval_path_dist[l_num]
-                example_num += eval_path_dist[l_num]
-            metrics["eval_new_saving"] = 1 - layer_cnt / ( example_num * model_layer_num[-1])
+                layer_cnt += layer_sum * eval_path_dist[idx] # .cpu().numpy()
+                example_num += eval_path_dist[idx] # .cpu().numpy()
+            print(eval_path_dist) 
+            metrics["eval_new_saving"] = (1 - layer_cnt / ( example_num * model_layer_num[-1]))
+        
         if len(eval_classification_reward) > 0:
             metrics["eval_classification_reward"] = np.mean(eval_classification_reward)
         if len(eval_path_reward) > 0:
