@@ -849,7 +849,6 @@ class Trainer:
                     dist = dist.reshape(len(model_layer_num), -1)
                     dist = np.sum(dist.detach().cpu().numpy(), axis=-1)
                     for idx, num in enumerate(dist):
-                        print(idx)
                         eval_path_dist[idx] += num
                 # if require_head_masks:
                 #     head_masks = outputs[-1] # the last one， tuple: (Tensor(bsz,  num_attention_heads, seq_len, 1), )

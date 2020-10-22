@@ -570,6 +570,7 @@ class AdaBertEncoder(nn.Module):
                     if i == len(self.small_layer_num):  # final, exits all left instances here
                         final_logits.append(logit[left_idx])
                         logit_idx.append(left_idx)
+                        paths[i] += len(left_idx) 
                     else:
                         cur_entropy = entropy(logit[left_idx])  # num_left
                         exit_idx = left_idx[cur_entropy < self.ent_threshold]
