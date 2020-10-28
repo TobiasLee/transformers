@@ -325,6 +325,48 @@ class MnliDifProcessor(DataProcessor):
         return examples
 
 
+class MnliDifClsProcessor(DataProcessor):
+    """Processor for the MultiNLI data set (GLUE version)."""
+
+    def get_example_from_tensor_dict(self, tensor_dict):
+        """See base class."""
+        return InputExample(
+            tensor_dict["idx"].numpy(),
+            tensor_dict["premise"].numpy().decode("utf-8"),
+            tensor_dict["hypothesis"].numpy().decode("utf-8"),
+            str(tensor_dict["label"].numpy()),
+        )
+
+    def get_train_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(self._read_tsv(os.path.join(data_dir, "train.dif.tsv")), "train")
+
+    def get_dev_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(self._read_tsv(os.path.join(data_dir, "dev.dif.tsv")), "dev_matched")
+
+    def get_test_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(self._read_tsv(os.path.join(data_dir, "test_matched.tsv")), "test_matched")
+
+    def get_labels(self):
+        """See base class."""
+        return ["1.0", "2.0", "3.0", "4.0"]
+
+    def _create_examples(self, lines, set_type):
+        """Creates examples for the training, dev and test sets."""
+        examples = []
+        for (i, line) in enumerate(lines):
+            if i == 0:
+                continue
+            guid = "%s-%s" % (set_type, line[0])
+            text_a = line[8]
+            text_b = line[9]
+            label = None if set_type.startswith("test") else line[-1]
+            examples.append(InputExample(guid=guid, text_a=text_a, text_b=text_b, label=label))
+        return examples
+
+
 class MnliMismatchedProcessor(MnliProcessor):
     """Processor for the MultiNLI Mismatched data set (GLUE version)."""
 
@@ -692,6 +734,54 @@ class QqpDifProcessor(DataProcessor):
         return examples
 
 
+class QqpDifClsProcessor(DataProcessor):
+    """Processor for the QQP data set (GLUE version)."""
+
+    def get_example_from_tensor_dict(self, tensor_dict):
+        """See base class."""
+        return InputExample(
+            tensor_dict["idx"].numpy(),
+            tensor_dict["question1"].numpy().decode("utf-8"),
+            tensor_dict["question2"].numpy().decode("utf-8"),
+            str(tensor_dict["label"].numpy()),
+        )
+
+    def get_train_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(self._read_tsv(os.path.join(data_dir, "train.dif.tsv")), "train")
+
+    def get_dev_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(self._read_tsv(os.path.join(data_dir, "dev.dif.tsv")), "dev")
+
+    def get_test_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(self._read_tsv(os.path.join(data_dir, "test.tsv")), "test")
+
+    def get_labels(self):
+        """See base class."""
+        return ["1.0", "2.0", "3.0", "4.0"]
+
+    def _create_examples(self, lines, set_type):
+        """Creates examples for the training, dev and test sets."""
+        test_mode = set_type == "test"
+        q1_index = 1 if test_mode else 3
+        q2_index = 2 if test_mode else 4
+        examples = []
+        for (i, line) in enumerate(lines):
+            if i == 0:
+                continue
+            guid = "%s-%s" % (set_type, line[0])
+            try:
+                text_a = line[q1_index]
+                text_b = line[q2_index]
+                label = None if test_mode else line[-1]
+            except IndexError:
+                continue
+            examples.append(InputExample(guid=guid, text_a=text_a, text_b=text_b, label=label))
+        return examples
+
+
 class QnliProcessor(DataProcessor):
     """Processor for the QNLI data set (GLUE version)."""
 
@@ -835,6 +925,8 @@ glue_tasks_num_labels = {
     "qqp-dif": 1,
     "sst2-dif": 1,
     "sst2-dif-cls": 4,
+    "qqp-dif-cls": 4,
+    "mnli-dif-cls": 4,
 }
 
 glue_processors = {
@@ -854,7 +946,9 @@ glue_processors = {
     "mnli-dif": MnliDifProcessor,
     "sst2-dif": Sst2DifClsProcessor,
     "qqp-dif": QqpDifProcessor,
-    "sst2-dif-cls": Sst2DifClsProcessor
+    "sst2-dif-cls": Sst2DifClsProcessor,
+    "qqp-dif-cls": QqpDifClsProcessor,
+    "mnli-dif-cls": MnliDifClsProcessor,
 }
 
 glue_output_modes = {
@@ -874,5 +968,7 @@ glue_output_modes = {
     "mnli-dif": "regression",
     "qqp-dif": "regression",
     "sst2-dif": "regression",
-    'sst2-dif-cls': "classification"
+    'sst2-dif-cls': "classification",
+    'qqp-dif-cls': "classification",
+    'mnli-dif-cls': "classification",
 }
