@@ -85,6 +85,9 @@ if _has_sklearn:
             return acc_and_f1(preds, labels)
         elif task_name == "sts-b":
             return pearson_and_spearman(preds, labels)
+        elif 'cls' in task_name:
+            print(classification_report(preds, labels, output_dict=False))
+            return acc_and_all_f1(preds, labels)
         elif 'dif' in task_name:
             return pearson_and_spearman(preds, labels)
         elif task_name == "qqp":
