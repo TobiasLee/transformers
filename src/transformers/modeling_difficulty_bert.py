@@ -658,13 +658,14 @@ class BertModel(BertPreTrainedModel):
             input_ids=input_ids, position_ids=position_ids, token_type_ids=token_type_ids, inputs_embeds=inputs_embeds
         )
 
-        bsz, seq_len, hidden_size = embedding_output.size()
-        hidden_outputs, final_state = self.lstm(embedding_output)
-        hidden_outputs = hidden_outputs.view(bsz, seq_len, -1)
+        hidden_outputs = torch.mean(embedding_output, dim=1)
+        # bsz, seq_len, hidden_size = embedding_output.size()
+        # hidden_outputs, final_state = self.lstm(embedding_output)
+        # hidden_outputs = hidden_outputs.view(bsz, seq_len, -1)
         # add forward & backward
-        hidden_outputs = hidden_outputs[:, -1, :self.config.hidden_size] + hidden_outputs[:, -1, self.config.hidden_size:] # bsz, hidden_size
-        return hidden_outputs, final_state  #
-
+        # hidden_outputs = hidden_outputs[:, -1, :self.config.hidden_size] + hidden_outputs[:, -1,
+        #                                                                    self.config.hidden_size:]  # bsz, hidden_size
+        return hidden_outputs, None  #
 
 
 @add_start_docstrings(
@@ -749,7 +750,7 @@ class BertForDifficultyClassification(BertPreTrainedModel):
         lstm_output = self.dropout(lstm_output)
         logits = self.classifier(lstm_output)
 
-        outputs = (logits,) # + outputs[2:]  # add hidden states and attention if they are here
+        outputs = (logits,)  # + outputs[2:]  # add hidden states and attention if they are here
 
         if labels is not None:
             if self.num_labels == 1:
