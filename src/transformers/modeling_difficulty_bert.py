@@ -638,6 +638,7 @@ class BertModel(BertPreTrainedModel):
 
         """
 
+        self.lstm.flatten_parameters()
         if input_ids is not None and inputs_embeds is not None:
             raise ValueError("You cannot specify both input_ids and inputs_embeds at the same time")
         elif input_ids is not None:
@@ -657,8 +658,11 @@ class BertModel(BertPreTrainedModel):
         embedding_output = self.embeddings(
             input_ids=input_ids, position_ids=position_ids, token_type_ids=token_type_ids, inputs_embeds=inputs_embeds
         )
-
+       
         bsz, seq_len, hidden_size = embedding_output.size()
+        
+
+        
         hidden_outputs, final_state = self.lstm(embedding_output)
         hidden_outputs = hidden_outputs.view(bsz, seq_len, -1)
         # add forward & backward
