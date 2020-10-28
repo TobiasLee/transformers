@@ -662,9 +662,8 @@ class BertModel(BertPreTrainedModel):
         hidden_outputs, final_state = self.lstm(embedding_output)
         hidden_outputs = hidden_outputs.view(bsz, seq_len, -1)
         # add forward & backward
-        hidden_outputs = hidden_outputs[:, :, :self.config.hidden_size] + hidden_outputs[:, :, self.config.hidden_size:]
-
-        return hidden_outputs  #
+        hidden_outputs = hidden_outputs[:, -1, :self.config.hidden_size] + hidden_outputs[:, -1, self.config.hidden_size:] # bsz, hidden_size
+        return hidden_outputs, final_state  #
 
 
 
@@ -744,14 +743,13 @@ class BertForDifficultyClassification(BertPreTrainedModel):
             position_ids=position_ids,
             head_mask=head_mask,
             inputs_embeds=inputs_embeds,
-            mlp_mask=mlp_mask
         )
 
         lstm_output = outputs[0]
         lstm_output = self.dropout(lstm_output)
         logits = self.classifier(lstm_output)
 
-        outputs = (logits,) + outputs[2:]  # add hidden states and attention if they are here
+        outputs = (logits,) # + outputs[2:]  # add hidden states and attention if they are here
 
         if labels is not None:
             if self.num_labels == 1:
