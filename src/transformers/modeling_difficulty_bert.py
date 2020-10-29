@@ -24,6 +24,7 @@ import torch
 from torch import nn
 from torch.nn import CrossEntropyLoss, MSELoss
 from torch.nn.utils.rnn import pad_packed_sequence as unpack
+from torch.nn.utils.rnn import pad_packed_sequence as unpack
 
 from .activations import gelu, gelu_new, swish
 from .configuration_bert import BertConfig
@@ -389,10 +390,7 @@ class BertLayer(nn.Module):
             outputs = outputs + cross_attention_outputs[1:]  # add cross attentions if we output attention weights
 
         intermediate_output = self.intermediate(attention_output)
-        if mlp_mask is None:
-            layer_output = self.output(intermediate_output, attention_output)
-        else:
-            layer_output = self.output(intermediate_output, attention_output, mlp_mask)
+        layer_output = self.output(intermediate_output, attention_output, mlp_mask)
         outputs = (layer_output,) + outputs
         return outputs
 
@@ -578,12 +576,17 @@ class BertModel(BertPreTrainedModel):
                             bidirectional=True,
                             batch_first=True)
         self.init_weights()
+        self.transformer_layer = BertLayer(config)
+        self.agent_type = 'bow'
 
     def get_input_embeddings(self):
         return self.embeddings.word_embeddings
 
     def set_input_embeddings(self, value):
         self.embeddings.word_embeddings = value
+
+    def set_agent_type(self, agent_type):
+        self.agent_type = agent_type
 
     @add_start_docstrings_to_callable(BERT_INPUTS_DOCSTRING.format("(batch_size, sequence_length)"))
     def forward(
@@ -650,8 +653,6 @@ class BertModel(BertPreTrainedModel):
 
         device = input_ids.device if input_ids is not None else inputs_embeds.device
 
-        if attention_mask is None:
-            attention_mask = torch.ones(input_shape, device=device)
         if token_type_ids is None:
             token_type_ids = torch.zeros(input_shape, dtype=torch.long, device=device)
 
@@ -659,12 +660,22 @@ class BertModel(BertPreTrainedModel):
             input_ids=input_ids, position_ids=position_ids, token_type_ids=token_type_ids, inputs_embeds=inputs_embeds
         )
 
-        # hidden_outputs = torch.mean(embedding_output, dim=1)
-        bsz, seq_len, hidden_size = embedding_output.size()
-        hidden_outputs, final_state = self.lstm(embedding_output)
-        hidden_outputs = hidden_outputs.view(bsz, seq_len, -1)
-        # add forward & backward
-        hidden_outputs = hidden_outputs[:, 0, self.config.hidden_size:]  # bsz, hidden_size
+        if self.agent_type == 'transformer':
+            # transformer agent
+            hidden_outputs = self.transformer_layer(embedding_output)[0]
+            hidden_outputs = torch.mean(hidden_outputs, dim=1)  # bsz, hidden_size
+        elif self.agent_type == 'bow':
+            # avg word embedding
+            hidden_outputs = torch.mean(embedding_output, dim=1)
+        elif self.agent_type == 'lstm':
+            # lstm version: <PAD> token is special is supposed to be masked
+            bsz, seq_len, hidden_size = embedding_output.size()
+            hidden_outputs, final_state = self.lstm(embedding_output)
+            hidden_outputs = hidden_outputs.view(bsz, seq_len, -1)
+            # take backward last one hidden states
+            hidden_outputs = hidden_outputs[:, 0, self.config.hidden_size:]  # bsz, hidden_size
+        else:
+            raise ValueError("Unsupported agent type" % self.agent_type)
         return hidden_outputs, None  #
 
 
