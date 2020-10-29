@@ -156,6 +156,9 @@ def main():
                 preds = np.argmax(p.predictions, axis=1)
             elif output_mode == "regression":
                 preds = np.squeeze(p.predictions)
+                
+            print(len(preds))
+            print(len(p.label_ids))
             return glue_compute_metrics(task_name, preds, p.label_ids)
 
         return compute_metrics_fn
