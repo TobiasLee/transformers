@@ -60,6 +60,9 @@ class ModelArguments:
     cache_dir: Optional[str] = field(
         default=None, metadata={"help": "Where do you want to store the pretrained models downloaded from s3"}
     )
+    agent_type: Optional[str] = field(
+        default="bow", metadata={"help": "Agent type for predicting the difficulty label"}
+    )
 
 
 def main():
@@ -133,7 +136,8 @@ def main():
         config=config,
         cache_dir=model_args.cache_dir,
     )
-
+    logger.info("Setting agent type to %s" % model_args.agent_type)
+    model.bert.set_agent_type(model_args.agent_type)
     # Get datasets
     train_dataset = (
         GlueDataset(data_args, tokenizer=tokenizer, evaluate=False) #cache_dir=model_args.cache_dir)
