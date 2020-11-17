@@ -107,10 +107,10 @@ class BertForMultitaskClassification(BertPreTrainedModel):
                 if self.task_num_labels == 1:
                     #  We are doing regression
                     loss_fct = MSELoss()
-                    loss += loss_fct(task_logits.view(-1), task_labels.view(-1))
+                    task_loss = loss_fct(task_logits.view(-1), task_labels.view(-1))
                 else:
                     loss_fct = CrossEntropyLoss()
-                    loss += loss_fct(task_logits.view(-1, self.task_num_labels), task_labels.view(-1))
-                outputs = (loss,) + outputs
+                    task_loss = loss_fct(task_logits.view(-1, self.task_num_labels), task_labels.view(-1))
+            outputs = (loss + task_loss, ) + outputs
 
         return outputs  # (loss), logits, (hidden_states), (attentions)
