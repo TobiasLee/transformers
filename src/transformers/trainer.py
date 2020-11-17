@@ -811,6 +811,8 @@ class Trainer:
         eval_path_dist = defaultdict(lambda: 0)
         preds: torch.Tensor = None
         label_ids: torch.Tensor = None
+        task_label_ids: torch.Tensor = None
+        task_preds = None
         learned_head_masks: torch.Tensor = None
         paths: list = []
         model.eval()
@@ -869,6 +871,17 @@ class Trainer:
                         label_ids = inputs["labels"].detach()
                     else:
                         label_ids = torch.cat((label_ids, inputs["labels"].detach()), dim=0)
+
+                if inputs.get("task_labels") is not None:
+                    if task_label_ids is None:
+                        task_label_ids = inputs["task_labels"].detach()
+                    else:
+                        task_label_ids = torch.cat((task_label_ids, inputs["task_labels"].detach()), dim=0)
+                    if task_preds is None:
+                        task_preds = outputs[1].detach()
+                    else:
+                        task_preds = torch.cat((task_preds, outputs[1].detach()), dim=0)
+
         end = time.time()
 
         if self.args.local_rank != -1:
@@ -908,6 +921,11 @@ class Trainer:
 
         if self.compute_metrics is not None and preds is not None and label_ids is not None:
             metrics = self.compute_metrics(EvalPrediction(predictions=preds, label_ids=label_ids))
+            if task_preds is not None:
+                task_metrics = self.compute_metrics(EvalPrediction(predictions=task_preds,
+                                                                   label_ids=task_label_ids))
+                logger.info("task metrics: ")
+                self._log(task_metrics)
         else:
             metrics = {}
         if len(eval_losses) > 0:
