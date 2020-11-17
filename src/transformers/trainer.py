@@ -400,7 +400,6 @@ class Trainer:
             num_train_epochs = self.args.num_train_epochs
 
         optimizer, scheduler = self.get_optimizers(num_training_steps=t_total)
-
         # Check if saved optimizer or scheduler states exist
         if (
                 model_path is not None
@@ -850,14 +849,7 @@ class Trainer:
                     dist = np.sum(dist.detach().cpu().numpy(), axis=-1)
                     for idx, num in enumerate(dist):
                         eval_path_dist[idx] += num
-                # if require_head_masks:
-                #     head_masks = outputs[-1] # the last one， tuple: (Tensor(bsz,  num_attention_heads, seq_len, 1), )
-                #     head_masks = torch.stack(head_masks).squeeze() # (12, bsz, num_heads, seq_len, 1)
-                #     head_masks = head_masks.transpose(1, 0) # bsz, num_layer, num_heads, seq_len
-                #     if learned_head_masks is None:
-                #         learned_head_masks = head_masks.detach()
-                #     else:
-                #         learned_head_masks = torch.cat((learned_head_masks, head_masks.detach()), dim=0)
+
 
             if not prediction_loss_only:
                 if preds is None:

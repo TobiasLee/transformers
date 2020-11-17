@@ -10,9 +10,9 @@ class TaskSolver(nn.Module):
         self.output_layer_2 = nn.Linear(config.hidden_size, task_label_num)
         self.pooling = pooling
 
-    def forward(self, hidden):
+    def forward(self, hidden, attention_mask):
         hidden = torch.tanh(self.output_layer_0(hidden))
-        hidden = self.self_attn(hidden)[0]
+        hidden = self.self_attn(hidden, attention_mask)[0]
         if self.pooling == "mean":
             hidden = torch.mean(hidden, dim=-1)
         elif self.pooling == "max":
@@ -35,9 +35,9 @@ class DifficultyPredictor(nn.Module):
         self.output_layer_2 = nn.Linear(config.hidden_size, config.num_labels)  # difficulty task
         self.pooling = pooling
 
-    def forward(self, hidden):
+    def forward(self, hidden, attention_mask):
         hidden = torch.tanh(self.output_layer_0(hidden))
-        hidden = self.self_attn(hidden)[0]
+        hidden = self.self_attn(hidden, attention_mask)[0]
         if self.pooling == "mean":
             hidden = torch.mean(hidden, dim=1)
         elif self.pooling == "max":
