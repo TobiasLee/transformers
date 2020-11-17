@@ -92,7 +92,7 @@ class BertForMultitaskClassification(BertPreTrainedModel):
         extended_attention_mask = self.get_extended_attention_mask(attention_mask, input_shape, device)
         task_logits = self.task_classifier(hidden_output, extended_attention_mask)
         difficulty_logits = self.difficulty_classifier(hidden_output, extended_attention_mask)
-        outputs = (difficulty_logits, )  # + outputs[2:]  # add hidden states and attention if they are here
+        outputs = (difficulty_logits, task_logits)  # + outputs[2:]  # add hidden states and attention if they are here
 
         if labels is not None:
             if self.num_labels == 1:

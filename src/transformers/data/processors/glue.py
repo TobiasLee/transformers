@@ -386,6 +386,54 @@ class MnliDifClsProcessor(DataProcessor):
         return examples
 
 
+class MnliMultitaskProcessor(DataProcessor):
+    """Processor for the MultiNLI data set (GLUE version)."""
+
+    def get_example_from_tensor_dict(self, tensor_dict):
+        """See base class."""
+        return MultitaskInputExample(
+            tensor_dict["idx"].numpy(),
+            tensor_dict["premise"].numpy().decode("utf-8"),
+            tensor_dict["hypothesis"].numpy().decode("utf-8"),
+            str(tensor_dict["label"].numpy()),
+            str(tensor_dict["task_label"].numpy()),
+        )
+
+    def get_train_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(self._read_tsv(os.path.join(data_dir, "train.dif_v2.tsv")), "train")
+
+    def get_dev_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(self._read_tsv(os.path.join(data_dir, "dev.dif_v2.tsv")), "dev_matched")
+
+    def get_test_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(self._read_tsv(os.path.join(data_dir, "test_matched.tsv")), "test_matched")
+
+    def get_labels(self):
+        """See base class."""
+        return ["1.0", "2.0", "3.0", "4.0"]
+
+    def get_task_labels(self):
+        return ["contradiction", "entailment", "neutral"]
+
+    def _create_examples(self, lines, set_type):
+        """Creates examples for the training, dev and test sets."""
+        examples = []
+        for (i, line) in enumerate(lines):
+            if i == 0:
+                continue
+            guid = "%s-%s" % (set_type, line[0])
+            text_a = line[8]
+            text_b = line[9]
+            label = None if set_type.startswith("test") else line[-1]
+            task_label = None if set_type.startswith("test") else line[-2]
+            examples.append(MultitaskInputExample(guid=guid, text_a=text_a, text_b=text_b,
+                                                  label=label, task_label=task_label))
+        return examples
+
+
 class MnliMismatchedProcessor(MnliProcessor):
     """Processor for the MultiNLI Mismatched data set (GLUE version)."""
 
@@ -997,6 +1045,7 @@ glue_tasks_num_labels = {
     "qqp-dif-cls": 4,
     "mnli-dif-cls": 2,
     'sst2-multitask': 4,
+    "mnli-multitask": 4
 }
 
 glue_processors = {
@@ -1019,7 +1068,8 @@ glue_processors = {
     "sst2-dif-cls": Sst2DifClsProcessor,
     "qqp-dif-cls": QqpDifClsProcessor,
     "mnli-dif-cls": MnliDifClsProcessor,
-    "sst2-multitask": Sst2MultitaskProcessor
+    "sst2-multitask": Sst2MultitaskProcessor,
+    'mnli-multitask': MnliMultitaskProcessor,
 }
 
 glue_output_modes = {
@@ -1043,4 +1093,5 @@ glue_output_modes = {
     'qqp-dif-cls': "classification",
     'mnli-dif-cls': "classification",
     'sst2-multitask': "multitask",
+    'mnli-multitask': "multitask",
 }
