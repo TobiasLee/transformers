@@ -59,7 +59,8 @@ class BertForMultitaskClassification(BertPreTrainedModel):
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
         self.task_num_labels = task_label_num
         # task
-        self.task_classifier = TaskSolver(config, task_label_num=task_label_num, pooling=task_pooling)
+        # self.task_classifier = TaskSolver(config, task_label_num=task_label_num, pooling=task_pooling)
+        self.task_classifier = nn.Linear(config.hidden_size, task_label_num)
         # difficulty classifier
         self.difficulty_classifier = DifficultyPredictor(config, pooling=difficulty_pooling)
         self.init_weights()
@@ -90,8 +91,12 @@ class BertForMultitaskClassification(BertPreTrainedModel):
         input_shape = input_ids.size()
         device = input_ids.device if input_ids is not None else inputs_embeds.device
         extended_attention_mask = self.get_extended_attention_mask(attention_mask, input_shape, device)
-        task_logits = self.task_classifier(hidden_output, extended_attention_mask)
         difficulty_logits = self.difficulty_classifier(hidden_output, extended_attention_mask)
+
+        pooled_output = outputs[1]
+        pooled_output = self.dropout(pooled_output)
+        task_logits = self.task_classifier(pooled_output)
+        # task_logits = self.task_classifier(hidden_output, extended_attention_mask)
         outputs = (difficulty_logits, task_logits)  # + outputs[2:]  # add hidden states and attention if they are here
 
         if labels is not None:
