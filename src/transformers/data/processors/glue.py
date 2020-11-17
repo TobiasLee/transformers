@@ -29,10 +29,9 @@ if is_tf_available():
 
 logger = logging.getLogger(__name__)
 
-
-
 reg_dif_mappings = {"1.0": "1.0", "2.0": "100.0", "3.0": "100.0", "4.0": "100.0"}
 cls_dif_mappings = {"1.0": "1.0", "2.0": "2.0", "3.0": "3.0", "4.0": "4.0"}
+
 
 def glue_convert_examples_to_features(
         examples: Union[List[InputExample], "tf.data.Dataset"],
@@ -65,7 +64,8 @@ def glue_convert_examples_to_features(
             raise ValueError("When calling glue_convert_examples_to_features from TF, the task parameter is required.")
         return _tf_glue_convert_examples_to_features(examples, tokenizer, max_length=max_length, task=task)
     return _glue_convert_examples_to_features(
-        examples, tokenizer, max_length=max_length, task=task, label_list=label_list, task_label_list=task_label_list, output_mode=output_mode
+        examples, tokenizer, max_length=max_length, task=task, label_list=label_list, task_label_list=task_label_list,
+        output_mode=output_mode
     )
 
 
@@ -129,9 +129,9 @@ def _glue_convert_examples_to_features(
         if output_mode is None:
             output_mode = glue_output_modes[task]
             logger.info("Using output mode %s for task %s" % (output_mode, task))
-    if output_mode == 'multitask' and task is not None :
+    if output_mode == 'multitask' and task is not None:
         processor = glue_processors[task]()
-        task_label_list = processor.get_task_labels() 
+        task_label_list = processor.get_task_labels()
 
     label_map = {label: i for i, label in enumerate(label_list)}
 
@@ -370,7 +370,7 @@ class MnliDifClsProcessor(DataProcessor):
 
     def get_labels(self):
         """See base class."""
-        return ["1.0", "2.0"] # , "3.0", "4.0"]
+        return ["1.0", "2.0"]  # , "3.0", "4.0"]
 
     def _create_examples(self, lines, set_type):
         """Creates examples for the training, dev and test sets."""
@@ -600,7 +600,7 @@ class Sst2DifClsProcessor(DataProcessor):
 
     def get_labels(self):
         """See base class."""
-        return ["1.0", "2.0" , "3.0", "4.0"]
+        return ["1.0", "2.0", "3.0", "4.0"]
 
     def _create_examples(self, lines, set_type):
         """Creates examples for the training, dev and test sets."""
@@ -658,10 +658,10 @@ class Sst2MultitaskProcessor(DataProcessor):
                 continue
             guid = "%s-%s" % (set_type, i)
             text_a = line[text_index]
-            label = None if set_type == "test" else line[-2]
-            difficulty_label = None if set_type == "test" else line[-1]
+            label = None if set_type == "test" else line[-1]
+            task_label = None if set_type == "test" else line[-2]
             examples.append(MultitaskInputExample(guid=guid, text_a=text_a, text_b=None,
-                                                  label=difficulty_label, task_label=label))
+                                                  label=label, task_label=task_label))
         return examples
 
 
@@ -996,7 +996,7 @@ glue_tasks_num_labels = {
     "sst2-dif-cls": 4,
     "qqp-dif-cls": 4,
     "mnli-dif-cls": 2,
-    'sst2-multitask': 4, 
+    'sst2-multitask': 4,
 }
 
 glue_processors = {

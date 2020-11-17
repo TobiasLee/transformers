@@ -104,6 +104,7 @@ class InputFeatures:
         """Serializes this instance to a JSON string."""
         return json.dumps(dataclasses.asdict(self)) + "\n"
 
+
 @dataclass(frozen=True)
 class MultitaskInputFeatures:
     """
