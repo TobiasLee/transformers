@@ -12,15 +12,15 @@ class TaskSolver(nn.Module):
 
     def forward(self, hidden):
         hidden = torch.tanh(self.output_layer_0(hidden))
-        hidden = self.self_attn(hidden)
+        hidden = self.self_attn(hidden)[0]
         if self.pooling == "mean":
             hidden = torch.mean(hidden, dim=-1)
         elif self.pooling == "max":
             hidden = torch.max(hidden, dim=1)[0]
         elif self.pooling == "last":
-            hidden = hidden[:, -1, :]
+            hidden = hidden[:, -1]
         else:  # default [CLS] pooling
-            hidden = hidden[:, 0, :]
+            hidden = hidden[:, 0]
         output_1 = torch.tanh(self.output_layer_1(hidden))
         logits = self.output_layer_2(output_1)
         return logits
@@ -28,7 +28,7 @@ class TaskSolver(nn.Module):
 
 class DifficultyPredictor(nn.Module):
     def __init__(self, config, pooling='mean'):
-        super(TaskSolver, self).__init__()
+        super(DifficultyPredictor, self).__init__()
         self.output_layer_0 = nn.Linear(config.hidden_size, config.hidden_size)
         self.self_attn = BertSelfAttention(config)
         self.output_layer_1 = nn.Linear(config.hidden_size, config.hidden_size)
@@ -37,9 +37,9 @@ class DifficultyPredictor(nn.Module):
 
     def forward(self, hidden):
         hidden = torch.tanh(self.output_layer_0(hidden))
-        hidden = self.self_attn(hidden)
+        hidden = self.self_attn(hidden)[0]
         if self.pooling == "mean":
-            hidden = torch.mean(hidden, dim=-1)
+            hidden = torch.mean(hidden, dim=1)
         elif self.pooling == "max":
             hidden = torch.max(hidden, dim=1)[0]
         elif self.pooling == "last":
@@ -102,13 +102,13 @@ class BertForMultitaskClassification(BertPreTrainedModel):
                 loss = loss_fct(difficulty_logits.view(-1, self.num_labels), labels.view(-1))
 
             if task_labels is not None:
-                if self.diffculty_num_labels == 1:
+                if self.task_num_labels == 1:
                     #  We are doing regression
                     loss_fct = MSELoss()
                     loss += loss_fct(task_logits.view(-1), task_labels.view(-1))
                 else:
                     loss_fct = CrossEntropyLoss()
-                    loss += loss_fct(task_logits.view(-1, self.difficulty_num_labels), task_labels.view(-1))
+                    loss += loss_fct(task_logits.view(-1, self.task_num_labels), task_labels.view(-1))
                 outputs = (loss,) + outputs
 
         return outputs  # (loss), logits, (hidden_states), (attentions)
