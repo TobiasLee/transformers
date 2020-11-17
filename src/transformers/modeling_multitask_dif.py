@@ -27,7 +27,7 @@ class TaskSolver(nn.Module):
 
 
 class DifficultyPredictor(nn.Module):
-    def __init__(self, config, pooling='mean'):
+    def __init__(self, config, pooling='cls'):
         super(DifficultyPredictor, self).__init__()
         self.output_layer_0 = nn.Linear(config.hidden_size, config.hidden_size)
         self.self_attn = BertSelfAttention(config)
