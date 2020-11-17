@@ -67,6 +67,13 @@ class DefaultDataCollator(DataCollator):
         else:
             batch = {}
 
+        if hasattr(first, "task_label") and first.task_label is not None:
+            if type(first.label) is int:
+                task_labels = torch.tensor([f.task_label for f in features], dtype=torch.long)
+            else:
+                task_labels = torch.tensor([f.task_label for f in features], dtype=torch.float)
+            batch["task_labels"] = task_labels
+
         # Handling of all other possible attributes.
         # Again, we will use the first element to figure out which key/values are not None for this model.
         for k, v in vars(first).items():

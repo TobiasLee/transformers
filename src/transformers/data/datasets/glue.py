@@ -133,7 +133,7 @@ class GlueDataset(Dataset):
             elif self.current_idx == 1:
                 return len(self.features_for_dev)
 
-    def __getitem__(self, i) -> InputFeatures:
+    def __getitem__(self, i):
         if self.mode == "all":
             return self.features[i]  # do not split
         elif self.mode == 'half':  # use half to searching optimal architecture

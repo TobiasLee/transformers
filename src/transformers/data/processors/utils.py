@@ -23,9 +23,9 @@ from typing import List, Optional, Union
 
 from ...file_utils import is_tf_available, is_torch_available
 
-
 logger = logging.getLogger(__name__)
-csv.field_size_limit(sys.maxsize) 
+csv.field_size_limit(sys.maxsize)
+
 
 @dataclass
 class InputExample:
@@ -46,6 +46,32 @@ class InputExample:
     text_a: str
     text_b: Optional[str] = None
     label: Optional[str] = None
+
+    def to_json_string(self):
+        """Serializes this instance to a JSON string."""
+        return json.dumps(dataclasses.asdict(self), indent=2) + "\n"
+
+
+@dataclass
+class MultitaskInputExample:
+    """
+    A single training/test example for simple sequence classification.
+
+    Args:
+        guid: Unique id for the example.
+        text_a: string. The untokenized text of the first sequence. For single
+            sequence tasks, only this sequence must be specified.
+        text_b: (Optional) string. The untokenized text of the second sequence.
+            Only must be specified for sequence pair tasks.
+        label: (Optional) string. The label of the example. This should be
+            specified for train and dev examples, but not for test examples.
+    """
+
+    guid: str
+    text_a: str
+    text_b: Optional[str] = None
+    label: Optional[str] = None  # difficulty label
+    task_label: Optional[str] = None
 
     def to_json_string(self):
         """Serializes this instance to a JSON string."""
@@ -73,6 +99,33 @@ class InputFeatures:
     attention_mask: Optional[List[int]] = None
     token_type_ids: Optional[List[int]] = None
     label: Optional[Union[int, float]] = None
+
+    def to_json_string(self):
+        """Serializes this instance to a JSON string."""
+        return json.dumps(dataclasses.asdict(self)) + "\n"
+
+
+class MultitaskInputFeatures:
+    """
+    A single set of features of data.
+    Property names are the same names as the corresponding inputs to a model.
+
+    Args:
+        input_ids: Indices of input sequence tokens in the vocabulary.
+        attention_mask: Mask to avoid performing attention on padding token indices.
+            Mask values selected in ``[0, 1]``:
+            Usually  ``1`` for tokens that are NOT MASKED, ``0`` for MASKED (padded) tokens.
+        token_type_ids: (Optional) Segment token indices to indicate first and second
+            portions of the inputs. Only some models use them.
+        label: (Optional) Label corresponding to the input. Int for classification problems,
+            float for regression problems.
+    """
+
+    input_ids: List[int]
+    attention_mask: Optional[List[int]] = None
+    token_type_ids: Optional[List[int]] = None
+    label: Optional[Union[int, float]] = None  # difficulty label
+    task_label: Optional[Union[int, float]] = None
 
     def to_json_string(self):
         """Serializes this instance to a JSON string."""
@@ -139,7 +192,7 @@ class SingleSentenceClassificationProcessor(DataProcessor):
 
     @classmethod
     def create_from_csv(
-        cls, file_name, split_name="", column_label=0, column_text=1, column_id=None, skip_first_row=False, **kwargs
+            cls, file_name, split_name="", column_label=0, column_text=1, column_id=None, skip_first_row=False, **kwargs
     ):
         processor = cls(**kwargs)
         processor.add_examples_from_csv(
@@ -161,15 +214,15 @@ class SingleSentenceClassificationProcessor(DataProcessor):
         return processor
 
     def add_examples_from_csv(
-        self,
-        file_name,
-        split_name="",
-        column_label=0,
-        column_text=1,
-        column_id=None,
-        skip_first_row=False,
-        overwrite_labels=False,
-        overwrite_examples=False,
+            self,
+            file_name,
+            split_name="",
+            column_label=0,
+            column_text=1,
+            column_id=None,
+            skip_first_row=False,
+            overwrite_labels=False,
+            overwrite_examples=False,
     ):
         lines = self._read_tsv(file_name)
         if skip_first_row:
@@ -191,7 +244,7 @@ class SingleSentenceClassificationProcessor(DataProcessor):
         )
 
     def add_examples(
-        self, texts_or_text_and_labels, labels=None, ids=None, overwrite_labels=False, overwrite_examples=False
+            self, texts_or_text_and_labels, labels=None, ids=None, overwrite_labels=False, overwrite_examples=False
     ):
         assert labels is None or len(texts_or_text_and_labels) == len(labels)
         assert ids is None or len(texts_or_text_and_labels) == len(ids)
@@ -224,13 +277,13 @@ class SingleSentenceClassificationProcessor(DataProcessor):
         return self.examples
 
     def get_features(
-        self,
-        tokenizer,
-        max_length=None,
-        pad_on_left=False,
-        pad_token=0,
-        mask_padding_with_zero=True,
-        return_tensors=None,
+            self,
+            tokenizer,
+            max_length=None,
+            pad_on_left=False,
+            pad_token=0,
+            mask_padding_with_zero=True,
+            return_tensors=None,
     ):
         """
         Convert examples in a list of ``InputFeatures``
