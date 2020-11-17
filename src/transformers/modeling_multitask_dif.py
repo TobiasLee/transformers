@@ -43,9 +43,9 @@ class DifficultyPredictor(nn.Module):
         elif self.pooling == "max":
             hidden = torch.max(hidden, dim=1)[0]
         elif self.pooling == "last":
-            hidden = hidden[:, -1, :]
-        else: # default [CLS] pooling
-            hidden = hidden[:, 0, :]
+            hidden = hidden[:, -1]
+        else:  # default [CLS] pooling
+            hidden = hidden[:, 0]
         output_1 = torch.tanh(self.output_layer_1(hidden))
         logits = self.output_layer_2(output_1)
         return logits
@@ -86,10 +86,12 @@ class BertForMultitaskClassification(BertPreTrainedModel):
             head_mask=head_mask,
             inputs_embeds=inputs_embeds,
         )
-
         hidden_output = outputs[0]
-        task_logits = self.task_classifier(hidden_output)
-        difficulty_logits = self.difficulty_classifier(hidden_output)
+        input_shape = input_ids.size()
+        device = input_ids.device if input_ids is not None else inputs_embeds.device
+        extended_attention_mask = self.get_extended_attention_mask(attention_mask, input_shape, device)
+        task_logits = self.task_classifier(hidden_output, extended_attention_mask)
+        difficulty_logits = self.difficulty_classifier(hidden_output, extended_attention_mask)
         outputs = (difficulty_logits, )  # + outputs[2:]  # add hidden states and attention if they are here
 
         if labels is not None:
