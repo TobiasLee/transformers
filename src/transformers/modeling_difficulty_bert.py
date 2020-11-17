@@ -25,6 +25,8 @@ from torch import nn
 from torch.nn import CrossEntropyLoss, MSELoss
 from torch.nn.utils.rnn import pad_packed_sequence as unpack
 from torch.nn.utils.rnn import pad_packed_sequence as unpack
+import torch.nn.functional as F
+
 
 from .activations import gelu, gelu_new, swish
 from .configuration_bert import BertConfig
@@ -431,7 +433,7 @@ class BertEncoder(nn.Module):
                 all_hidden_states = all_hidden_states + (hidden_states,)
 
             layer_outputs = layer_module(
-                hidden_states, attention_mask, head_mask[i], encoder_hidden_states, encoder_attention_mask, mlp_mask[i]
+                hidden_states, attention_mask, head_mask[i], encoder_hidden_states, encoder_attention_mask
             )
             hidden_states = layer_outputs[0]
 
@@ -464,7 +466,19 @@ class BertPooler(nn.Module):
         pooled_output = self.activation(pooled_output)
         return pooled_output
 
+class DifficultyPooler(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.dense = nn.Linear(config.hidden_size, config.hidden_size)
+        self.activation = nn.Tanh()
 
+    def forward(self, hidden_states):
+        # We "pool" the model by simply taking the hidden state corresponding
+        # to the first token.
+        first_token_tensor = torch.mean(hidden_states, dim=1)
+        pooled_output = self.dense(first_token_tensor)
+        pooled_output = self.activation(pooled_output)
+        return pooled_output
 class BertPreTrainedModel(PreTrainedModel):
     """ An abstract class to handle weights initialization and
         a simple interface for downloading and loading pretrained models.
@@ -570,14 +584,18 @@ class BertModel(BertPreTrainedModel):
         self.config = config
 
         self.embeddings = BertEmbeddings(config)
+        #self.embeddings = nn.Embedding(config.vocab_size, config.hidden_size, padding_idx=config.pad_token_id)
         self.lstm = nn.LSTM(config.hidden_size, config.hidden_size,
                             num_layers=2,
                             dropout=config.hidden_dropout_prob,
                             bidirectional=True,
                             batch_first=True)
-        self.init_weights()
+        self.encoder = BertEncoder(config)
+        self.pooler = BertPooler(config)
         self.transformer_layer = BertLayer(config)
         self.agent_type = 'bow'
+        self.dif_pooler = DifficultyPooler(config)
+        self.init_weights()
 
     def get_input_embeddings(self):
         return self.embeddings.word_embeddings
@@ -641,7 +659,6 @@ class BertModel(BertPreTrainedModel):
 
         """
 
-        self.lstm.flatten_parameters()
         if input_ids is not None and inputs_embeds is not None:
             raise ValueError("You cannot specify both input_ids and inputs_embeds at the same time")
         elif input_ids is not None:
@@ -657,9 +674,9 @@ class BertModel(BertPreTrainedModel):
             token_type_ids = torch.zeros(input_shape, dtype=torch.long, device=device)
 
         embedding_output = self.embeddings(
-            input_ids=input_ids, position_ids=position_ids, token_type_ids=token_type_ids, inputs_embeds=inputs_embeds
+          input_ids=input_ids, position_ids=position_ids, token_type_ids=token_type_ids, inputs_embeds=inputs_embeds
         )
-
+        #embedding_output = self.embeddings(input_ids)
         if self.agent_type == 'transformer':
             # transformer agent
             hidden_outputs = self.transformer_layer(embedding_output)[0]
@@ -667,6 +684,7 @@ class BertModel(BertPreTrainedModel):
         elif self.agent_type == 'bow':
             # avg word embedding
             hidden_outputs = torch.mean(embedding_output, dim=1)
+            hidden_outputs = F.tanh(hidden_outputs)
         elif self.agent_type == 'lstm':
             # lstm version: <PAD> token is special is supposed to be masked
             bsz, seq_len, hidden_size = embedding_output.size()
@@ -674,6 +692,17 @@ class BertModel(BertPreTrainedModel):
             hidden_outputs = hidden_outputs.view(bsz, seq_len, -1)
             # take backward last one hidden states
             hidden_outputs = hidden_outputs[:, 0, self.config.hidden_size:]  # bsz, hidden_size
+        elif self.agent_type == 'bert':
+            head_mask = self.get_head_mask(head_mask, self.config.num_hidden_layers)
+
+            hidden_outputs = self.encoder(
+                  embedding_output,
+                  attention_mask=None,
+                  head_mask=head_mask,
+                  encoder_hidden_states=None,
+                  encoder_attention_mask=None,
+            )
+            hidden_outputs = self.dif_pooler(hidden_outputs[0])
         else:
             raise ValueError("Unsupported agent type" % self.agent_type)
         return hidden_outputs, None  #
@@ -691,7 +720,7 @@ class BertForDifficultyClassification(BertPreTrainedModel):
 
         self.bert = BertModel(config)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
-        self.classifier = nn.Linear(config.hidden_size, config.num_labels)
+        self.dif_classifier = nn.Linear(config.hidden_size, config.num_labels)
 
         self.init_weights()
 
@@ -759,7 +788,7 @@ class BertForDifficultyClassification(BertPreTrainedModel):
 
         lstm_output = outputs[0]
         lstm_output = self.dropout(lstm_output)
-        logits = self.classifier(lstm_output)
+        logits = self.dif_classifier(lstm_output)
 
         outputs = (logits,)  # + outputs[2:]  # add hidden states and attention if they are here
 

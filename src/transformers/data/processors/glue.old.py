@@ -30,10 +30,6 @@ if is_tf_available():
 logger = logging.getLogger(__name__)
 
 
-
-reg_dif_mappings = {"1.0": "1.0", "2.0": "100.0", "3.0": "100.0", "4.0": "100.0"}
-cls_dif_mappings = {"1.0": "1.0", "2.0": "2.0", "3.0": "3.0", "4.0": "4.0"}
-
 def glue_convert_examples_to_features(
         examples: Union[List[InputExample], "tf.data.Dataset"],
         tokenizer: PreTrainedTokenizer,
@@ -271,7 +267,7 @@ class MnliProcessor(DataProcessor):
 
     def get_labels(self):
         """See base class."""
-        return ["contradiction", "entailment", "neutral"]
+        return ["entailment", "neutral", "contradiction" ]
 
     def _create_examples(self, lines, set_type):
         """Creates examples for the training, dev and test sets."""
@@ -324,7 +320,7 @@ class MnliDifProcessor(DataProcessor):
             guid = "%s-%s" % (set_type, line[0])
             text_a = line[8]
             text_b = line[9]
-            label = None if set_type.startswith("test") else reg_dif_mappings[line[-1]]
+            label = None if set_type.startswith("test") else line[-1]
             examples.append(InputExample(guid=guid, text_a=text_a, text_b=text_b, label=label))
         return examples
 
@@ -355,7 +351,7 @@ class MnliDifClsProcessor(DataProcessor):
 
     def get_labels(self):
         """See base class."""
-        return ["1.0", "2.0"] # , "3.0", "4.0"]
+        return ["1.0", "2.0", "3.0", "4.0"]
 
     def _create_examples(self, lines, set_type):
         """Creates examples for the training, dev and test sets."""
@@ -366,7 +362,7 @@ class MnliDifClsProcessor(DataProcessor):
             guid = "%s-%s" % (set_type, line[0])
             text_a = line[8]
             text_b = line[9]
-            label = None if set_type.startswith("test") else cls_dif_mappings[line[-1]]
+            label = None if set_type.startswith("test") else line[-1]
             examples.append(InputExample(guid=guid, text_a=text_a, text_b=text_b, label=label))
         return examples
 
@@ -492,7 +488,7 @@ class Sst2Processor(DataProcessor):
 
     def get_dev_examples(self, data_dir):
         """See base class."""
-        return self._create_examples(self._read_tsv(os.path.join(data_dir, "dev.tsv")), "dev")
+        return self._create_examples(self._read_tsv(os.path.join(data_dir, "dev.original.tsv")), "dev")
 
     def get_test_examples(self, data_dir):
         """See base class."""
@@ -553,8 +549,7 @@ class Sst2DifProcessor(DataProcessor):
                 continue
             guid = "%s-%s" % (set_type, i)
             text_a = line[text_index]
-            print(reg_dif_mappings[line[-1]])
-            label = None if set_type == "test" else reg_dif_mappings[line[-1]]
+            label = None if set_type == "test" else line[-1]
             examples.append(InputExample(guid=guid, text_a=text_a, text_b=None, label=label))
         return examples
 
@@ -573,11 +568,11 @@ class Sst2DifClsProcessor(DataProcessor):
 
     def get_train_examples(self, data_dir):
         """See base class."""
-        return self._create_examples(self._read_tsv(os.path.join(data_dir, "train.dif_v2.tsv")), "train")
+        return self._create_examples(self._read_tsv(os.path.join(data_dir, "train.dif.tsv")), "train")
 
     def get_dev_examples(self, data_dir):
         """See base class."""
-        return self._create_examples(self._read_tsv(os.path.join(data_dir, "dev.dif_v2.tsv")), "dev")
+        return self._create_examples(self._read_tsv(os.path.join(data_dir, "dev.dif.tsv")), "dev")
 
     def get_test_examples(self, data_dir):
         """See base class."""
@@ -585,7 +580,7 @@ class Sst2DifClsProcessor(DataProcessor):
 
     def get_labels(self):
         """See base class."""
-        return ["1.0", "2.0" , "3.0", "4.0"]
+        return ["1.0", "2.0", "3.0", "4.0"]
 
     def _create_examples(self, lines, set_type):
         """Creates examples for the training, dev and test sets."""
@@ -596,8 +591,7 @@ class Sst2DifClsProcessor(DataProcessor):
                 continue
             guid = "%s-%s" % (set_type, i)
             text_a = line[text_index]
-            label = None if set_type == "test" else cls_dif_mappings[line[-1]]
-            print(label)
+            label = None if set_type == "test" else line[-1]
             examples.append(InputExample(guid=guid, text_a=text_a, text_b=None, label=label))
         return examples
 
@@ -733,7 +727,7 @@ class QqpDifProcessor(DataProcessor):
             try:
                 text_a = line[q1_index]
                 text_b = line[q2_index]
-                label = None if test_mode else reg_dif_mappings[line[-1]]
+                label = None if test_mode else line[-1]
             except IndexError:
                 continue
             examples.append(InputExample(guid=guid, text_a=text_a, text_b=text_b, label=label))
@@ -932,7 +926,7 @@ glue_tasks_num_labels = {
     "sst2-dif": 1,
     "sst2-dif-cls": 4,
     "qqp-dif-cls": 4,
-    "mnli-dif-cls": 2,
+    "mnli-dif-cls": 4,
 }
 
 glue_processors = {
