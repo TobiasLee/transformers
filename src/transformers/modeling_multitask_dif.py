@@ -3,6 +3,7 @@ from .modeling_bert import *
 
 class TaskSolver(nn.Module):
     def __init__(self, config, task_label_num=2, pooling='cls'):
+        super(TaskSolver, self).__init__()
         self.output_layer_0 = nn.Linear(config.hidden_size, config.hidden_size)
         self.self_attn = BertSelfAttention(config)
         self.output_layer_1 = nn.Linear(config.hidden_size, config.hidden_size)
@@ -27,6 +28,7 @@ class TaskSolver(nn.Module):
 
 class DifficultyPredictor(nn.Module):
     def __init__(self, config, pooling='mean'):
+        super(TaskSolver, self).__init__()
         self.output_layer_0 = nn.Linear(config.hidden_size, config.hidden_size)
         self.self_attn = BertSelfAttention(config)
         self.output_layer_1 = nn.Linear(config.hidden_size, config.hidden_size)
