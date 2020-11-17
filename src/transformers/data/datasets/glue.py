@@ -66,7 +66,9 @@ class GlueDataset(Dataset):
         self.args = args
         processor = glue_processors[args.task_name]()
         self.label_list = processor.get_labels()
+
         self.output_mode = glue_output_modes[args.task_name]
+        self.task_label_list = processor.get_task_labels() if self.output_mode =='multitask' else None 
         # Load data features from cache or dataset file
         cached_features_file = os.path.join(
             args.data_dir,
@@ -110,6 +112,7 @@ class GlueDataset(Dataset):
                     tokenizer,
                     max_length=args.max_seq_length,
                     label_list=label_list,
+                    task_label_list=self.task_label_list,
                     output_mode=self.output_mode,
                 )
                 logger.info("creating half features")
@@ -133,7 +136,7 @@ class GlueDataset(Dataset):
             elif self.current_idx == 1:
                 return len(self.features_for_dev)
 
-    def __getitem__(self, i) -> InputFeatures:
+    def __getitem__(self, i):
         if self.mode == "all":
             return self.features[i]  # do not split
         elif self.mode == 'half':  # use half to searching optimal architecture

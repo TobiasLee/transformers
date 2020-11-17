@@ -22,7 +22,7 @@ from typing import List, Optional, Union
 
 from ...file_utils import is_tf_available
 from ...tokenization_utils import PreTrainedTokenizer
-from .utils import DataProcessor, InputExample, InputFeatures
+from .utils import DataProcessor, InputExample, InputFeatures, MultitaskInputFeatures, MultitaskInputExample
 
 if is_tf_available():
     import tensorflow as tf
@@ -40,6 +40,7 @@ def glue_convert_examples_to_features(
         max_length: Optional[int] = None,
         task=None,
         label_list=None,
+        task_label_list=None,
         output_mode=None,
 ):
     """
@@ -64,7 +65,7 @@ def glue_convert_examples_to_features(
             raise ValueError("When calling glue_convert_examples_to_features from TF, the task parameter is required.")
         return _tf_glue_convert_examples_to_features(examples, tokenizer, max_length=max_length, task=task)
     return _glue_convert_examples_to_features(
-        examples, tokenizer, max_length=max_length, task=task, label_list=label_list, output_mode=output_mode
+        examples, tokenizer, max_length=max_length, task=task, label_list=label_list, task_label_list=task_label_list, output_mode=output_mode
     )
 
 
@@ -113,11 +114,13 @@ def _glue_convert_examples_to_features(
         max_length: Optional[int] = None,
         task=None,
         label_list=None,
+        task_label_list=None,
         output_mode=None,
 ):
     if max_length is None:
         max_length = tokenizer.max_len
 
+    difficulty_map = None
     if task is not None:
         processor = glue_processors[task]()
         if label_list is None:
@@ -126,8 +129,13 @@ def _glue_convert_examples_to_features(
         if output_mode is None:
             output_mode = glue_output_modes[task]
             logger.info("Using output mode %s for task %s" % (output_mode, task))
+    if output_mode == 'multitask' and task is not None :
+        processor = glue_processors[task]()
+        task_label_list = processor.get_task_labels() 
 
     label_map = {label: i for i, label in enumerate(label_list)}
+
+    task_map = {task_lbl: i for i, task_lbl in enumerate(task_label_list)} if output_mode == 'multitask' else None
 
     def label_from_example(example: InputExample) -> Union[int, float, None]:
         if example.label is None:
@@ -136,6 +144,8 @@ def _glue_convert_examples_to_features(
             return label_map[example.label]
         elif output_mode == "regression":
             return float(example.label)
+        elif output_mode == 'multitask':
+            return (label_map[example.label], task_map[example.task_label])
         raise KeyError(output_mode)
 
     labels = [label_from_example(example) for example in examples]
@@ -148,7 +158,11 @@ def _glue_convert_examples_to_features(
     for i in range(len(examples)):
         inputs = {k: batch_encoding[k][i] for k in batch_encoding}
 
-        feature = InputFeatures(**inputs, label=labels[i])
+        if output_mode == 'multitask':
+            feature = MultitaskInputFeatures(**inputs, label=labels[i][1], task_label=labels[i][0])
+        else:
+            feature = InputFeatures(**inputs, label=labels[i])
+
         features.append(feature)
 
     for i, example in enumerate(examples[:5]):
@@ -162,6 +176,7 @@ def _glue_convert_examples_to_features(
 class OutputMode(Enum):
     classification = "classification"
     regression = "regression"
+    multitask = "multitask"
 
 
 class PersonaProcessor(DataProcessor):
@@ -602,6 +617,54 @@ class Sst2DifClsProcessor(DataProcessor):
         return examples
 
 
+class Sst2MultitaskProcessor(DataProcessor):
+    """Processor for the SST-2 data set (GLUE version)."""
+
+    def get_example_from_tensor_dict(self, tensor_dict):
+        """See base class."""
+        return MultitaskInputExample(
+            tensor_dict["idx"].numpy(),
+            tensor_dict["sentence"].numpy().decode("utf-8"),
+            None,
+            str(tensor_dict["label"].numpy()),
+            str(tensor_dict["task_label"].numpy())
+        )
+
+    def get_train_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(self._read_tsv(os.path.join(data_dir, "train.dif_v2.tsv")), "train")
+
+    def get_dev_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(self._read_tsv(os.path.join(data_dir, "dev.dif_v2.tsv")), "dev")
+
+    def get_test_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(self._read_tsv(os.path.join(data_dir, "test.tsv")), "test")
+
+    def get_task_labels(self):
+        """See base class."""
+        return ["0", "1"]
+
+    def get_labels(self):
+        return ["1.0", "2.0", "3.0", "4.0"]
+
+    def _create_examples(self, lines, set_type):
+        """Creates examples for the training, dev and test sets."""
+        examples = []
+        text_index = 1 if set_type == "test" else 0
+        for (i, line) in enumerate(lines):
+            if i == 0:
+                continue
+            guid = "%s-%s" % (set_type, i)
+            text_a = line[text_index]
+            label = None if set_type == "test" else line[-2]
+            difficulty_label = None if set_type == "test" else line[-1]
+            examples.append(MultitaskInputExample(guid=guid, text_a=text_a, text_b=None,
+                                                  label=difficulty_label, task_label=label))
+        return examples
+
+
 class StsbProcessor(DataProcessor):
     """Processor for the STS-B data set (GLUE version)."""
 
@@ -933,6 +996,7 @@ glue_tasks_num_labels = {
     "sst2-dif-cls": 4,
     "qqp-dif-cls": 4,
     "mnli-dif-cls": 2,
+    'sst2-multitask': 4, 
 }
 
 glue_processors = {
@@ -955,6 +1019,7 @@ glue_processors = {
     "sst2-dif-cls": Sst2DifClsProcessor,
     "qqp-dif-cls": QqpDifClsProcessor,
     "mnli-dif-cls": MnliDifClsProcessor,
+    "sst2-multitask": Sst2MultitaskProcessor
 }
 
 glue_output_modes = {
@@ -977,4 +1042,5 @@ glue_output_modes = {
     'sst2-dif-cls': "classification",
     'qqp-dif-cls': "classification",
     'mnli-dif-cls': "classification",
+    'sst2-multitask': "multitask",
 }

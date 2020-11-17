@@ -703,6 +703,7 @@ class BertModel(BertPreTrainedModel):
                   encoder_attention_mask=None,
             )
             hidden_outputs = self.dif_pooler(hidden_outputs[0])
+
         else:
             raise ValueError("Unsupported agent type" % self.agent_type)
         return hidden_outputs, None  #
