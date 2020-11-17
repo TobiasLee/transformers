@@ -159,7 +159,7 @@ def _glue_convert_examples_to_features(
         inputs = {k: batch_encoding[k][i] for k in batch_encoding}
 
         if output_mode == 'multitask':
-            feature = MultitaskInputFeatures(**inputs, label=labels[i][1], task_label=labels[i][0])
+            feature = MultitaskInputFeatures(**inputs, label=labels[i][0], task_label=labels[i][1])
         else:
             feature = InputFeatures(**inputs, label=labels[i])
 
