@@ -62,7 +62,8 @@ class BertForMultitaskClassification(BertPreTrainedModel):
         # self.task_classifier = TaskSolver(config, task_label_num=task_label_num, pooling=task_pooling)
         self.task_classifier = nn.Linear(config.hidden_size, task_label_num)
         # difficulty classifier
-        self.difficulty_classifier = DifficultyPredictor(config, pooling=difficulty_pooling)
+        # self.difficulty_classifier = DifficultyPredictor(config, pooling=difficulty_pooling)
+        self.difficulty_classifier = nn.Linear(config.hidden_size, config.num_labels)
         self.init_weights()
 
     @add_start_docstrings_to_callable(BERT_INPUTS_DOCSTRING.format("(batch_size, sequence_length)"))
@@ -90,12 +91,13 @@ class BertForMultitaskClassification(BertPreTrainedModel):
         hidden_output = outputs[0]
         input_shape = input_ids.size()
         device = input_ids.device if input_ids is not None else inputs_embeds.device
-        extended_attention_mask = self.get_extended_attention_mask(attention_mask, input_shape, device)
-        difficulty_logits = self.difficulty_classifier(hidden_output, extended_attention_mask)
+        # extended_attention_mask = self.get_extended_attention_mask(attention_mask, input_shape, device)
+        # difficulty_logits = self.difficulty_classifier(hidden_output, extended_attention_mask)
 
         pooled_output = outputs[1]
         pooled_output = self.dropout(pooled_output)
         task_logits = self.task_classifier(pooled_output)
+        difficulty_logits = self.difficulty_classifier(pooled_output)
         # task_logits = self.task_classifier(hidden_output, extended_attention_mask)
         outputs = (difficulty_logits, task_logits)  # + outputs[2:]  # add hidden states and attention if they are here
 
