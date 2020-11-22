@@ -30,7 +30,7 @@ if is_tf_available():
 logger = logging.getLogger(__name__)
 
 reg_dif_mappings = {"1.0": "1.0", "2.0": "100.0", "3.0": "100.0", "4.0": "100.0"}
-cls_dif_mappings = {"1.0": "1.0", "2.0": "2.0", "3.0": "3.0", "4.0": "4.0"}
+cls_dif_mappings = {"1.0": "1.0", "2.0": "2.0", "3.0": "2.0", "4.0": "2.0"}
 
 
 def glue_convert_examples_to_features(
@@ -413,7 +413,7 @@ class MnliMultitaskProcessor(DataProcessor):
 
     def get_labels(self):
         """See base class."""
-        return ["1.0", "2.0", "3.0", "4.0"]
+        return ["1.0", "2.0"] # , "3.0", "4.0"]
 
     def get_task_labels(self):
         return ["contradiction", "entailment", "neutral"]
@@ -427,7 +427,7 @@ class MnliMultitaskProcessor(DataProcessor):
             guid = "%s-%s" % (set_type, line[0])
             text_a = line[8]
             text_b = line[9]
-            label = None if set_type.startswith("test") else line[-1]
+            label = None if set_type.startswith("test") else cls_dif_mappings[line[-1]]
             task_label = None if set_type.startswith("test") else line[-2]
             examples.append(MultitaskInputExample(guid=guid, text_a=text_a, text_b=text_b,
                                                   label=label, task_label=task_label))
@@ -1045,7 +1045,7 @@ glue_tasks_num_labels = {
     "qqp-dif-cls": 4,
     "mnli-dif-cls": 2,
     'sst2-multitask': 4,
-    "mnli-multitask": 4
+    "mnli-multitask": 2
 }
 
 glue_processors = {
