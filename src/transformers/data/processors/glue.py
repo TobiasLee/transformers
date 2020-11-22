@@ -425,7 +425,7 @@ class MnliMultitaskProcessor(DataProcessor):
 
     def get_labels(self):
         """See base class."""
-        return ["1.0", "2.0"] # , "3.0", "4.0"]
+        return ["1.0", "2.0"]  # , "3.0", "4.0"]
 
     def get_task_labels(self):
         return ["contradiction", "entailment", "neutral"]
@@ -443,6 +443,54 @@ class MnliMultitaskProcessor(DataProcessor):
             task_label = None if set_type.startswith("test") else line[-2]
             examples.append(MultitaskInputExample(guid=guid, text_a=text_a, text_b=text_b,
                                                   label=label, task_label=task_label))
+        return examples
+
+
+class MnliDifAwareProcessor(DataProcessor):
+    """Processor for the MultiNLI data set (GLUE version)."""
+
+    def get_example_from_tensor_dict(self, tensor_dict):
+        """See base class."""
+        return MultitaskInputExample(
+            tensor_dict["idx"].numpy(),
+            tensor_dict["premise"].numpy().decode("utf-8"),
+            tensor_dict["hypothesis"].numpy().decode("utf-8"),
+            str(tensor_dict["label"].numpy()),
+            str(tensor_dict["difficulty_label"].numpy()),
+        )
+
+    def get_train_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(self._read_tsv(os.path.join(data_dir, "train.dif_v2.tsv")), "train")
+
+    def get_dev_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(self._read_tsv(os.path.join(data_dir, "dev.dif_v2.tsv")), "dev_matched")
+
+    def get_test_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(self._read_tsv(os.path.join(data_dir, "test_matched.tsv")), "test_matched")
+
+    def get_difficulty_labels(self):
+        """See base class."""
+        return ["1.0", "2.0", "3.0", "4.0"]
+
+    def get_labels(self):
+        return ["contradiction", "entailment", "neutral"]
+
+    def _create_examples(self, lines, set_type):
+        """Creates examples for the training, dev and test sets."""
+        examples = []
+        for (i, line) in enumerate(lines):
+            if i == 0:
+                continue
+            guid = "%s-%s" % (set_type, line[0])
+            text_a = line[8]
+            text_b = line[9]
+            label = None if set_type.startswith("test") else line[-2]
+            difficulty_label = None if set_type.startswith("test") else line[-1]
+            examples.append(DifAwareInputExample(guid=guid, text_a=text_a, text_b=text_b,
+                                                 label=label, difficulty_label=difficulty_label))
         return examples
 
 
@@ -687,7 +735,7 @@ class Sst2MultitaskProcessor(DataProcessor):
             tensor_dict["sentence"].numpy().decode("utf-8"),
             None,
             str(tensor_dict["label"].numpy()),
-            str(tensor_dict["task_label"].numpy())
+            str(tensor_dict["difficulty_label"].numpy())
         )
 
     def get_train_examples(self, data_dir):
@@ -958,6 +1006,59 @@ class QqpDifClsProcessor(DataProcessor):
         return examples
 
 
+class QqpDifAwareProcessor(DataProcessor):
+    """Processor for the SST-2 data set (GLUE version)."""
+
+    def get_example_from_tensor_dict(self, tensor_dict):
+        """See base class."""
+        return MultitaskInputExample(
+            tensor_dict["idx"].numpy(),
+            tensor_dict["question1"].numpy().decode("utf-8"),
+            tensor_dict["question2"].numpy().decode("utf-8"),
+            str(tensor_dict["label"].numpy()),
+            str(tensor_dict["difficulty_label"].numpy())
+        )
+
+    def get_train_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(self._read_tsv(os.path.join(data_dir, "train.dif_v2.tsv")), "train")
+
+    def get_dev_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(self._read_tsv(os.path.join(data_dir, "dev.dif_v2.tsv")), "dev")
+
+    def get_test_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(self._read_tsv(os.path.join(data_dir, "test.tsv")), "test")
+
+    def get_labels(self):
+        return ["0", "1"]
+
+    def get_difficulty_labels(self):
+        return ["1.0", "2.0", "3.0", "4.0"]
+
+    def _create_examples(self, lines, set_type):
+        """Creates examples for the training, dev and test sets."""
+        test_mode = set_type == "test"
+        q1_index = 1 if test_mode else 3
+        q2_index = 2 if test_mode else 4
+        examples = []
+        for (i, line) in enumerate(lines):
+            if i == 0:
+                continue
+            guid = "%s-%s" % (set_type, line[0])
+            try:
+                text_a = line[q1_index]
+                text_b = line[q2_index]
+                label = None if test_mode else line[5]
+                difficulty_label = None if set_type == "test" else line[-1]
+            except IndexError:
+                continue
+            examples.append(DifAwareInputExample(guid=guid, text_a=text_a, text_b=text_b,
+                                                 label=label, difficulty_label=difficulty_label))
+        return examples
+
+
 class QnliProcessor(DataProcessor):
     """Processor for the QNLI data set (GLUE version)."""
 
@@ -1133,6 +1234,8 @@ glue_processors = {
     "sst2-multitask": Sst2MultitaskProcessor,
     'mnli-multitask': MnliMultitaskProcessor,
     'sst2-difaware': Sst2DifAwareProcessor,
+    'qqp-difaware': QqpDifAwareProcessor,
+    'mnli-difaware': MnliDifAwareProcessor,
 }
 
 glue_output_modes = {
