@@ -68,7 +68,8 @@ class GlueDataset(Dataset):
         self.label_list = processor.get_labels()
 
         self.output_mode = glue_output_modes[args.task_name]
-        self.task_label_list = processor.get_task_labels() if self.output_mode =='multitask' else None 
+        self.task_label_list = processor.get_task_labels() if self.output_mode =='multitask' else None
+        self.difficulty_label_list = processor.get_difficulty_labels() if self.output_mode == "difaware" else None
         # Load data features from cache or dataset file
         cached_features_file = os.path.join(
             args.data_dir,
@@ -113,6 +114,7 @@ class GlueDataset(Dataset):
                     max_length=args.max_seq_length,
                     label_list=label_list,
                     task_label_list=self.task_label_list,
+                    difficulty_label_list=self.difficulty_label_list,
                     output_mode=self.output_mode,
                 )
                 logger.info("creating half features")

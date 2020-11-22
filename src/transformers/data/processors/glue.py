@@ -41,6 +41,7 @@ def glue_convert_examples_to_features(
         task=None,
         label_list=None,
         task_label_list=None,
+        difficulty_label_list=None,
         output_mode=None,
 ):
     """
@@ -66,6 +67,7 @@ def glue_convert_examples_to_features(
         return _tf_glue_convert_examples_to_features(examples, tokenizer, max_length=max_length, task=task)
     return _glue_convert_examples_to_features(
         examples, tokenizer, max_length=max_length, task=task, label_list=label_list, task_label_list=task_label_list,
+        difficulty_label_list=difficulty_label_list,
         output_mode=output_mode
     )
 
@@ -116,6 +118,7 @@ def _glue_convert_examples_to_features(
         task=None,
         label_list=None,
         task_label_list=None,
+        difficulty_label_list=None,
         output_mode=None,
 ):
     if max_length is None:
@@ -135,11 +138,11 @@ def _glue_convert_examples_to_features(
         task_label_list = processor.get_task_labels()
     if output_mode == 'difaware' and task is not None:
         processor = glue_processors[task]()
-        difficulty_map_label_list = processor.get_difficulty_labels()
+        difficulty_label_list = processor.get_difficulty_labels()
     label_map = {label: i for i, label in enumerate(label_list)}
 
     task_map = {task_lbl: i for i, task_lbl in enumerate(task_label_list)} if output_mode == 'multitask' else None
-    diff_map = {task_lbl: i for i, task_lbl in enumerate(difficulty_map_label_list)} if output_mode == 'difaware' else None
+    diff_map = {task_lbl: i for i, task_lbl in enumerate(difficulty_label_list)} if output_mode == 'difaware' else None
 
     def label_from_example(example: InputExample) -> Union[int, float, None]:
         if example.label is None:
