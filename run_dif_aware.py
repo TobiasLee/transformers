@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Dict, Optional
 
 import numpy as np
+from scipy.special import softmax
 
 from transformers import AutoConfig, AutoTokenizer, EvalPrediction, GlueDataset
 from transformers.modeling_confidence import BertConfidenceAwareClassification
@@ -60,7 +61,9 @@ class ModelArguments:
     cache_dir: Optional[str] = field(
         default=None, metadata={"help": "Where do you want to store the pretrained models downloaded from s3"}
     )
-
+    predict_file: Optional[str] = field(
+        default='train', metadata={"help": "Dataset to predict"}
+    )
 
 def main():
     # See all possible arguments in src/transformers/training_args.py
@@ -210,6 +213,32 @@ def main():
             eval_results.update(eval_result)
 
     if training_args.do_predict:
+        tasks = [data_args.task_name]
+        logger.info("Predict prob and label dict")
+        if model_args.predict_file == "train":
+            eval_datasets = [train_dataset]
+        elif model_args.predict_file == "eval":
+            eval_datasets = [eval_dataset]
+        elif model_args.predict_file == "test":
+            eval_datasets = [test_dataset]
+        else:
+            raise ValueError("Unsupported predict file %s" % data_args.predict_file)
+        # if data_args.task_name == "mnli":
+        #    tasks.append("mnli-mm")
+        #    eval_datasets.append(datasets["validation_mismatched"])
+
+        for dataset, task in zip(eval_datasets, tasks):
+            prediction_output = trainer.predict(test_dataset=dataset)
+            predictions = prediction_output.predictions
+            prediction_prob = softmax(predictions, axis=-1)
+            labels = prediction_output.label_ids
+            output_prob_file = os.path.join(training_args.output_dir, f"%s_results_{task}_prob.npy" % data_args.predict_file )
+            output_label_file = os.path.join(training_args.output_dir, f"%s_results_{task}_label.npy" % data_args.predict_file)
+            if trainer.is_world_process_zero():
+                np.save(output_prob_file, prediction_prob)
+                np.save(output_label_file, labels)
+
+
         logging.info("*** Test ***")
         test_datasets = [test_dataset]
         # if data_args.task_name == "mnli":
