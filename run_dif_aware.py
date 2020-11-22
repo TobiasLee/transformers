@@ -152,7 +152,7 @@ def main():
 
     def build_compute_metrics_fn(task_name: str) -> Callable[[EvalPrediction], Dict]:
         def compute_metrics_fn(p: EvalPrediction):
-            if output_mode == "classification" or output_mode == 'multitask':
+            if output_mode == "classification" or output_mode == 'multitask' or output_mode =='difaware':
                 preds = np.argmax(p.predictions, axis=1)
             elif output_mode == "regression":
                 preds = np.squeeze(p.predictions)
@@ -220,7 +220,7 @@ def main():
 
         for test_dataset in test_datasets:
             predictions = trainer.predict(test_dataset=eval_dataset).predictions
-            if output_mode == "classification" or output_mode == 'multitask':
+            if output_mode == "classification" or output_mode == 'multitask' or output_mode == "difaware":
                 predictions = np.argmax(predictions, axis=1)
 
             output_test_file = os.path.join(
