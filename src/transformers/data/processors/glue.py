@@ -1101,7 +1101,10 @@ glue_tasks_num_labels = {
     "qqp-dif-cls": 4,
     "mnli-dif-cls": 2,
     'sst2-multitask': 4,
-    "mnli-multitask": 2
+    "mnli-multitask": 2,
+    "sst2-difaware": 2,
+    "mnli-difaware": 3,
+    "qqp-difaware": 2,
 }
 
 glue_processors = {
@@ -1151,4 +1154,7 @@ glue_output_modes = {
     'mnli-dif-cls': "classification",
     'sst2-multitask': "multitask",
     'mnli-multitask': "multitask",
+    'sst2-difaware': "difaware",
+    'mnli-difaware': "difaware",
+    'qqp-difaware': "difaware",
 }
