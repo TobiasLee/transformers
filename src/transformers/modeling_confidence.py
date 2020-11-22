@@ -45,8 +45,8 @@ class BertConfidenceAwareClassification(BertPreTrainedModel):
         outputs = (task_logits, task_logits, )  # + outputs[2:]  # add hidden states and attention if they are here
 
         def _get_target_margin(dif1, dif2):
-            geq = torch.where(dif1 >= dif2, 1, torch.zeros_like(dif1))
-            less = torch.where(dif1 < dif2, -1, torch.zeros_like(dif2))
+            geq = torch.where(dif1 >= dif2, torch.ones_like(dif1), torch.zeros_like(dif1))
+            less = torch.where(dif1 < dif2, -1 * torch.ones_like(dif2), torch.zeros_like(dif2))
             margin = torch.abs(dif1 - dif2)
             target = geq + less
             return target, margin
@@ -58,7 +58,7 @@ class BertConfidenceAwareClassification(BertPreTrainedModel):
                 loss = loss_fct(task_logits.view(-1), task_labels.view(-1))
             else:
                 loss_fct = CrossEntropyLoss()
-                loss = loss_fct(task_logits.view(-1, self.num_labels), task_labels.view(-1))
+                loss = loss_fct(task_logits.view(-1, self.task_num_labels), task_labels.view(-1))
 
             if labels is not None:
                 # add difficulty aware loss here
@@ -74,9 +74,10 @@ class BertConfidenceAwareClassification(BertPreTrainedModel):
                 diff_label1 = 1.0 / (labels + 1)
                 diff_label2 = torch.roll(labels, -1)
                 target, margin = _get_target_margin(diff_label1, diff_label2)
-                rank_input2 = rank_input2 + margin / target
+                rank_input2 = rank_input2 + torch.true_divide(margin, target)
                 # add a ranking loss for difficulty aware training
-                loss += self.ranking_loss(rank_input1, rank_input2, target)
+                ranking_loss = self.ranking_loss(rank_input1, rank_input2, target)
+                loss += ranking_loss 
                 # if self.task_num_labels == 1:
                 #     #  We are doing regression
                 #     loss_fct = MSELoss()
