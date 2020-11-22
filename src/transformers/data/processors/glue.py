@@ -22,7 +22,8 @@ from typing import List, Optional, Union
 
 from ...file_utils import is_tf_available
 from ...tokenization_utils import PreTrainedTokenizer
-from .utils import DataProcessor, InputExample, InputFeatures, MultitaskInputFeatures, MultitaskInputExample
+from .utils import DataProcessor, InputExample, InputFeatures, MultitaskInputFeatures, MultitaskInputExample, \
+    DifAwareInputExample, DifAwareInputFeatures
 
 if is_tf_available():
     import tensorflow as tf
@@ -132,10 +133,13 @@ def _glue_convert_examples_to_features(
     if output_mode == 'multitask' and task is not None:
         processor = glue_processors[task]()
         task_label_list = processor.get_task_labels()
-
+    if output_mode == 'difaware' and task is not None:
+        processor = glue_processors[task]()
+        difficulty_map_label_list = processor.get_difficulty_labels()
     label_map = {label: i for i, label in enumerate(label_list)}
 
     task_map = {task_lbl: i for i, task_lbl in enumerate(task_label_list)} if output_mode == 'multitask' else None
+    diff_map = {task_lbl: i for i, task_lbl in enumerate(difficulty_map_label_list)} if output_mode == 'difaware' else None
 
     def label_from_example(example: InputExample) -> Union[int, float, None]:
         if example.label is None:
@@ -145,7 +149,9 @@ def _glue_convert_examples_to_features(
         elif output_mode == "regression":
             return float(example.label)
         elif output_mode == 'multitask':
-            return (label_map[example.label], task_map[example.task_label])
+            return label_map[example.label], task_map[example.task_label]
+        elif output_mode == 'difaware':
+            return label_map[example.label], diff_map[example.difficulty_label]
         raise KeyError(output_mode)
 
     labels = [label_from_example(example) for example in examples]
@@ -160,6 +166,8 @@ def _glue_convert_examples_to_features(
 
         if output_mode == 'multitask':
             feature = MultitaskInputFeatures(**inputs, label=labels[i][0], task_label=labels[i][1])
+        elif output_mode == 'difaware':
+            feature = DifAwareInputFeatures(**inputs, label=labels[i][0], difficulty_label=labels[i][1])
         else:
             feature = InputFeatures(**inputs, label=labels[i])
 
@@ -177,6 +185,7 @@ class OutputMode(Enum):
     classification = "classification"
     regression = "regression"
     multitask = "multitask"
+    difaware = "difaware"
 
 
 class PersonaProcessor(DataProcessor):
@@ -713,6 +722,53 @@ class Sst2MultitaskProcessor(DataProcessor):
         return examples
 
 
+class Sst2DifAwareProcessor(DataProcessor):
+    """Processor for the SST-2 data set (GLUE version)."""
+
+    def get_example_from_tensor_dict(self, tensor_dict):
+        """See base class."""
+        return MultitaskInputExample(
+            tensor_dict["idx"].numpy(),
+            tensor_dict["sentence"].numpy().decode("utf-8"),
+            None,
+            str(tensor_dict["label"].numpy()),
+            str(tensor_dict["difficulty_label"].numpy())
+        )
+
+    def get_train_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(self._read_tsv(os.path.join(data_dir, "train.dif_v2.tsv")), "train")
+
+    def get_dev_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(self._read_tsv(os.path.join(data_dir, "dev.dif_v2.tsv")), "dev")
+
+    def get_test_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(self._read_tsv(os.path.join(data_dir, "test.tsv")), "test")
+
+    def get_labels(self):
+        return ["0", "1"]
+
+    def get_difficulty_labels(self):
+        return ["1.0", "2.0", "3.0", "4.0"]
+
+    def _create_examples(self, lines, set_type):
+        """Creates examples for the training, dev and test sets."""
+        examples = []
+        text_index = 1 if set_type == "test" else 0
+        for (i, line) in enumerate(lines):
+            if i == 0:
+                continue
+            guid = "%s-%s" % (set_type, i)
+            text_a = line[text_index]
+            label = None if set_type == "test" else line[-2]
+            difficulty_label = None if set_type == "test" else line[-1]
+            examples.append(DifAwareInputExample(guid=guid, text_a=text_a, text_b=None,
+                                                 label=label, difficulty_label=difficulty_label))
+        return examples
+
+
 class StsbProcessor(DataProcessor):
     """Processor for the STS-B data set (GLUE version)."""
 
@@ -1070,6 +1126,7 @@ glue_processors = {
     "mnli-dif-cls": MnliDifClsProcessor,
     "sst2-multitask": Sst2MultitaskProcessor,
     'mnli-multitask': MnliMultitaskProcessor,
+    'sst2-difaware': Sst2DifAwareProcessor,
 }
 
 glue_output_modes = {
