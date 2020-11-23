@@ -69,7 +69,7 @@ class BertConfidenceAwareClassification(BertPreTrainedModel):
                 # difficulty defined as:  1 / (dif + 2 ) , 0.5, 0.33, 0.25, 0.2， suitable for 2/3 classes max margin 0.3
                 # confidence gap: [0.5, 1]  0.5
                 diff_label1 = 1.0 / (difficulty_labels + 1)
-                diff_label2 = torch.roll(difficulty_labels, -1)
+                diff_label2 = torch.roll(diff_label1, -1)
                 target, margin = _get_target_margin(diff_label1, diff_label2)
                 rank_input2 = rank_input2 + torch.true_divide(margin, target)
                 # add a ranking loss for difficulty aware training
