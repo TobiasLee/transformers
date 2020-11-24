@@ -60,7 +60,7 @@ class BertConfidenceAwareClassification(BertPreTrainedModel):
             if difficulty_labels is not None:
 
                 difficulty_idx = (difficulty_labels != 0)  # index for dif examples
-                if len(difficulty_labels) == 0:  # no difficulty examples, we do not compute the ranking loss
+                if len(difficulty_idx) == 0 or len(difficulty_idx) == len(difficulty_labels):  # no difficulty/easy examples in one batch, we do not compute the ranking loss
                     outputs = (loss,) + outputs
                     return outputs
 
