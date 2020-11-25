@@ -140,7 +140,7 @@ def main():
     # Get datasets
     train_dataset = (
         GlueDataset(data_args, tokenizer=tokenizer, evaluate=False) #cache_dir=model_args.cache_dir)
-        if training_args.do_train else None
+        # if training_args.do_train else None
     )
     eval_dataset = (
         GlueDataset(data_args, tokenizer=tokenizer, evaluate=True) # mode="dev", cache_dir=model_args.cache_dir)
@@ -222,7 +222,7 @@ def main():
         elif model_args.predict_file == "test":
             eval_datasets = [test_dataset]
         else:
-            raise ValueError("Unsupported predict file %s" % data_args.predict_file)
+            raise ValueError("Unsupported predict file %s" % model_args.predict_file)
         # if data_args.task_name == "mnli":
         #    tasks.append("mnli-mm")
         #    eval_datasets.append(datasets["validation_mismatched"])
@@ -232,9 +232,9 @@ def main():
             predictions = prediction_output.predictions
             prediction_prob = softmax(predictions, axis=-1)
             labels = prediction_output.label_ids
-            output_prob_file = os.path.join(training_args.output_dir, f"%s_results_{task}_prob.npy" % data_args.predict_file )
-            output_label_file = os.path.join(training_args.output_dir, f"%s_results_{task}_label.npy" % data_args.predict_file)
-            if trainer.is_world_process_zero():
+            output_prob_file = os.path.join(training_args.output_dir, f"%s_results_{task}_prob.npy" % model_args.predict_file )
+            output_label_file = os.path.join(training_args.output_dir, f"%s_results_{task}_label.npy" % model_args.predict_file)
+            if trainer.is_world_master():
                 np.save(output_prob_file, prediction_prob)
                 np.save(output_label_file, labels)
 
