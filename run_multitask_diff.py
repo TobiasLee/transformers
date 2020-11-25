@@ -25,7 +25,8 @@ from typing import Callable, Dict, Optional
 
 import numpy as np
 
-from transformers import AutoConfig, AutoModelForSequenceClassification, AutoTokenizer, EvalPrediction, GlueDataset
+from transformers import AutoConfig, AutoTokenizer, EvalPrediction, GlueDataset
+from transformers.modeling_multitask_dif import BertForMultitaskClassification
 from transformers import GlueDataTrainingArguments as DataTrainingArguments
 from transformers import (
     HfArgumentParser,
@@ -50,9 +51,6 @@ class ModelArguments:
     model_name_or_path: str = field(
         metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models"}
     )
-    skip_layer: bool = field(
-        default=False, metadata={"help": "BERT-Skip NL layer model"}
-    )
     config_name: Optional[str] = field(
         default=None, metadata={"help": "Pretrained config name or path if not the same as model_name"}
     )
@@ -62,14 +60,6 @@ class ModelArguments:
     cache_dir: Optional[str] = field(
         default=None, metadata={"help": "Where do you want to store the pretrained models downloaded from s3"}
     )
-    layer_limit: Optional[int] = field(
-        default=12, metadata={"help": "BERT-NL layer model "}
-    )
-    only_train_classifier: bool = field(
-        default=False, metadata={"help": "only optimize the classifier for eliminating the task-specific "
-                                         "representation adaption"}
-    )
-
 
 
 def main():
@@ -137,7 +127,7 @@ def main():
         model_args.tokenizer_name if model_args.tokenizer_name else model_args.model_name_or_path,
         cache_dir=model_args.cache_dir,
     )
-    model = AutoModelForSequenceClassification.from_pretrained(
+    model = BertForMultitaskClassification.from_pretrained(
         model_args.model_name_or_path,
         from_tf=bool(".ckpt" in model_args.model_name_or_path),
         config=config,
@@ -146,7 +136,7 @@ def main():
 
     # Get datasets
     train_dataset = (
-        GlueDataset(data_args, tokenizer=tokenizer, evaluate=False) #cache_dir=model_args.cache_dir) 
+        GlueDataset(data_args, tokenizer=tokenizer, evaluate=False) #cache_dir=model_args.cache_dir)
         if training_args.do_train else None
     )
     eval_dataset = (
@@ -162,52 +152,13 @@ def main():
 
     def build_compute_metrics_fn(task_name: str) -> Callable[[EvalPrediction], Dict]:
         def compute_metrics_fn(p: EvalPrediction):
-            if output_mode == "classification":
+            if output_mode == "classification" or output_mode == 'multitask':
                 preds = np.argmax(p.predictions, axis=1)
             elif output_mode == "regression":
                 preds = np.squeeze(p.predictions)
             return glue_compute_metrics(task_name, preds, p.label_ids)
 
         return compute_metrics_fn
-    
-    logger.info("Set BERT layer to %d" % model_args.layer_limit)
-    model.bert.encoder.set_layer_limit(model_args.layer_limit)
-    if model_args.skip_layer:
-        model_layer_list = {
-            "2": [6, 11],  # first and last layer
-            "3": [0, 5, 11],
-            "4": [0, 4, 8, 11],
-            "6": [0, 3, 5, 7, 9, 11],
-            "8": [0, 1, 2, 4, 6, 8, 10, 11]
-        }
-        logger.info("Select layer as: %s", str(model_layer_list[str(model_args.layer_limit)]))
-        model.bert.encoder.set_part_layer(model_layer_list[str(model_args.layer_limit)])
-
-    optimizer_grouped_parameters = None
-    if model_args.only_train_classifier:
-        logger.info("only updating pooler & classifier parameters")
-        no_decay = ["bias", "LayerNorm.weight"]
-        # train classifier and pooler
-        optimizer_grouped_parameters = [
-                {
-                    "params": [p for n, p in model.classifier.named_parameters() if not any(nd in n for nd in no_decay)],
-                    "weight_decay": training_args.weight_decay,
-                },
-                {
-                    "params": [p for n, p in model.bert.pooler.named_parameters() if
-                               not any(nd in n for nd in no_decay)],
-                    "weight_decay": training_args.weight_decay,
-                },
-                {
-                    "params": [p for n, p in model.bert.pooler.named_parameters() if any(nd in n for nd in no_decay)],
-                    "weight_decay": 0.0,
-                },
-                {
-                    "params": [p for n, p in model.classifier.named_parameters() if
-                               any(nd in n for nd in no_decay)],
-                    "weight_decay": 0.0,
-                },
-            ]
 
     # Initialize our Trainer
     trainer = Trainer(
@@ -216,7 +167,6 @@ def main():
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         compute_metrics=build_compute_metrics_fn(data_args.task_name),
-        optimizer_grouped_parameters=optimizer_grouped_parameters
     )
 
     # Training
@@ -237,11 +187,11 @@ def main():
 
         # Loop to handle MNLI double evaluation (matched, mis-matched)
         eval_datasets = [eval_dataset]
-        #if data_args.task_name == "mnli":
-        #    mnli_mm_data_args = dataclasses.replace(data_args, task_name="mnli-mm")
-        #    eval_datasets.append(
-        #        GlueDataset(mnli_mm_data_args, tokenizer=tokenizer, mode="dev", cache_dir=model_args.cache_dir)
-        #    )
+        # if data_args.task_name == "mnli":
+        #     mnli_mm_data_args = dataclasses.replace(data_args, task_name="mnli-mm")
+        #     eval_datasets.append(
+        #         GlueDataset(mnli_mm_data_args, tokenizer=tokenizer, mode="dev", cache_dir=model_args.cache_dir)
+        #     )
 
         for eval_dataset in eval_datasets:
             trainer.compute_metrics = build_compute_metrics_fn(eval_dataset.args.task_name)
@@ -262,15 +212,15 @@ def main():
     if training_args.do_predict:
         logging.info("*** Test ***")
         test_datasets = [test_dataset]
-        if data_args.task_name == "mnli":
-            mnli_mm_data_args = dataclasses.replace(data_args, task_name="mnli-mm")
-            test_datasets.append(
-                GlueDataset(mnli_mm_data_args, tokenizer=tokenizer, mode="test", cache_dir=model_args.cache_dir)
-            )
+        # if data_args.task_name == "mnli":
+        #     mnli_mm_data_args = dataclasses.replace(data_args, task_name="mnli-mm")
+        #     test_datasets.append(
+        #         GlueDataset(mnli_mm_data_args, tokenizer=tokenizer, mode="test", cache_dir=model_args.cache_dir)
+        #     )
 
         for test_dataset in test_datasets:
-            predictions = trainer.predict(test_dataset=test_dataset).predictions
-            if output_mode == "classification":
+            predictions = trainer.predict(test_dataset=eval_dataset).predictions
+            if output_mode == "classification" or output_mode == 'multitask':
                 predictions = np.argmax(predictions, axis=1)
 
             output_test_file = os.path.join(

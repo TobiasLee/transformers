@@ -14,7 +14,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """ Finetuning the library models for sequence classification on GLUE (Bert, XLM, XLNet, RoBERTa, Albert, XLM-RoBERTa)."""
-
+from copy import deepcopy
+from itertools import combinations_with_replacement
 
 import dataclasses
 import logging
@@ -22,10 +23,12 @@ import os
 import sys
 from dataclasses import dataclass, field
 from typing import Callable, Dict, Optional
-
+import time
 import numpy as np
+import torch.nn as nn
 
-from transformers import AutoConfig, AutoModelForSequenceClassification, AutoTokenizer, EvalPrediction, GlueDataset
+from transformers import AutoConfig, AutoTokenizer, EvalPrediction, GlueDataset
+from transformers.modeling_adabert import MultipleBertForSequenceClassification
 from transformers import GlueDataTrainingArguments as DataTrainingArguments
 from transformers import (
     HfArgumentParser,
@@ -37,7 +40,6 @@ from transformers import (
     set_seed,
 )
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -46,12 +48,11 @@ class ModelArguments:
     """
     Arguments pertaining to which model/config/tokenizer we are going to fine-tune from.
     """
-
     model_name_or_path: str = field(
         metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models"}
     )
-    skip_layer: bool = field(
-        default=False, metadata={"help": "BERT-Skip NL layer model"}
+    require_exit_dist: bool = field(
+        default=False, metadata={"help": "Require model distribution for analysis"}
     )
     config_name: Optional[str] = field(
         default=None, metadata={"help": "Pretrained config name or path if not the same as model_name"}
@@ -62,14 +63,15 @@ class ModelArguments:
     cache_dir: Optional[str] = field(
         default=None, metadata={"help": "Where do you want to store the pretrained models downloaded from s3"}
     )
-    layer_limit: Optional[int] = field(
-        default=12, metadata={"help": "BERT-NL layer model "}
+    model_infer_idx: Optional[int] = field(
+        default=0, metadata={"help": "set inference model for evaluating"}
     )
-    only_train_classifier: bool = field(
-        default=False, metadata={"help": "only optimize the classifier for eliminating the task-specific "
-                                         "representation adaption"}
+    model_infer_mode: Optional[str] = field(
+        default='fix', metadata={"help": "set model inference mode, fix, refine, and auto"}
     )
-
+    entropy_threshold: Optional[float] = field(
+        default=-1.0, metadata={"help": "entropy threshold used in the refine mode"}
+    )
 
 
 def main():
@@ -87,10 +89,10 @@ def main():
         model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 
     if (
-        os.path.exists(training_args.output_dir)
-        and os.listdir(training_args.output_dir)
-        and training_args.do_train
-        and not training_args.overwrite_output_dir
+            os.path.exists(training_args.output_dir)
+            and os.listdir(training_args.output_dir)
+            and training_args.do_train
+            and not training_args.overwrite_output_dir
     ):
         raise ValueError(
             f"Output directory ({training_args.output_dir}) already exists and is not empty. Use --overwrite_output_dir to overcome."
@@ -137,29 +139,54 @@ def main():
         model_args.tokenizer_name if model_args.tokenizer_name else model_args.model_name_or_path,
         cache_dir=model_args.cache_dir,
     )
-    model = AutoModelForSequenceClassification.from_pretrained(
+    model = MultipleBertForSequenceClassification.from_pretrained(
         model_args.model_name_or_path,
         from_tf=bool(".ckpt" in model_args.model_name_or_path),
         config=config,
-        cache_dir=model_args.cache_dir,
+        cache_dir=model_args.cache_dir
     )
+
+    small_layer_n_list = model.bert.multiple_encoder.small_layer_num  # [6, 2]
+    if training_args.do_train:  # do_train, copy the first layer for now
+        model.bert.multiple_encoder.shallow_layers = nn.ModuleList(
+            [
+                nn.ModuleList(
+                    [deepcopy(model.bert.encoder.layer[ix]) for ix in range(k)]
+                ) for k in small_layer_n_list
+            ]
+        )
+        model.bert.multiple_encoder.init_pooler_weights(model.bert.pooler)
+
+    # set inference args
+    model.bert.multiple_encoder.set_infer_mode(model_args.model_infer_mode)
+    model.bert.multiple_encoder.set_entropy_threshold(model_args.entropy_threshold)
+
+    # no_decay = ['bias', 'LayerNorm.weight']
+    optimizer_grouped_parameters = []
+    # # add param for only training agent afterwards
+    # optimizer_grouped_parameters.extend([
+    #     {'params': [p for n, p in model.bert.mutiple_encoder.named_parameters() if
+    #                 not any(nd in n for nd in no_decay)], 'weight_decay': training_args.weight_decay},
+    #     {'params': [p for n, p in model.bert.mutiple_encoder.named_parameters() if
+    #                 any(nd in n for nd in no_decay)], 'weight_decay': 0.0},
+    # ])
 
     # Get datasets
     train_dataset = (
-        GlueDataset(data_args, tokenizer=tokenizer, evaluate=False) #cache_dir=model_args.cache_dir) 
-        if training_args.do_train else None
+        GlueDataset(data_args, tokenizer=tokenizer, evaluate=False) if training_args.do_train else None
     )
     eval_dataset = (
-        GlueDataset(data_args, tokenizer=tokenizer, evaluate=True) # mode="dev", cache_dir=model_args.cache_dir)
+        GlueDataset(data_args, tokenizer=tokenizer, evaluate=True)  # mode="dev", cache_dir=model_args.cache_dir)
         if training_args.do_eval
         else None
     )
     test_dataset = (
-        GlueDataset(data_args, tokenizer=tokenizer, evaluate=True) # mode="test", cache_dir=model_args.cache_dir)
+        GlueDataset(data_args, tokenizer=tokenizer, evaluate=True)  #
         if training_args.do_predict
         else None
     )
 
+    # train_dataset = eval_dataset # for testing agent capability
     def build_compute_metrics_fn(task_name: str) -> Callable[[EvalPrediction], Dict]:
         def compute_metrics_fn(p: EvalPrediction):
             if output_mode == "classification":
@@ -169,45 +196,6 @@ def main():
             return glue_compute_metrics(task_name, preds, p.label_ids)
 
         return compute_metrics_fn
-    
-    logger.info("Set BERT layer to %d" % model_args.layer_limit)
-    model.bert.encoder.set_layer_limit(model_args.layer_limit)
-    if model_args.skip_layer:
-        model_layer_list = {
-            "2": [6, 11],  # first and last layer
-            "3": [0, 5, 11],
-            "4": [0, 4, 8, 11],
-            "6": [0, 3, 5, 7, 9, 11],
-            "8": [0, 1, 2, 4, 6, 8, 10, 11]
-        }
-        logger.info("Select layer as: %s", str(model_layer_list[str(model_args.layer_limit)]))
-        model.bert.encoder.set_part_layer(model_layer_list[str(model_args.layer_limit)])
-
-    optimizer_grouped_parameters = None
-    if model_args.only_train_classifier:
-        logger.info("only updating pooler & classifier parameters")
-        no_decay = ["bias", "LayerNorm.weight"]
-        # train classifier and pooler
-        optimizer_grouped_parameters = [
-                {
-                    "params": [p for n, p in model.classifier.named_parameters() if not any(nd in n for nd in no_decay)],
-                    "weight_decay": training_args.weight_decay,
-                },
-                {
-                    "params": [p for n, p in model.bert.pooler.named_parameters() if
-                               not any(nd in n for nd in no_decay)],
-                    "weight_decay": training_args.weight_decay,
-                },
-                {
-                    "params": [p for n, p in model.bert.pooler.named_parameters() if any(nd in n for nd in no_decay)],
-                    "weight_decay": 0.0,
-                },
-                {
-                    "params": [p for n, p in model.classifier.named_parameters() if
-                               any(nd in n for nd in no_decay)],
-                    "weight_decay": 0.0,
-                },
-            ]
 
     # Initialize our Trainer
     trainer = Trainer(
@@ -216,9 +204,8 @@ def main():
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         compute_metrics=build_compute_metrics_fn(data_args.task_name),
-        optimizer_grouped_parameters=optimizer_grouped_parameters
+        optimizer_grouped_parameters=optimizer_grouped_parameters if len(optimizer_grouped_parameters) > 0 else None
     )
-
     # Training
     if training_args.do_train:
         trainer.train(
@@ -234,19 +221,20 @@ def main():
     eval_results = {}
     if training_args.do_eval:
         logger.info("*** Evaluate ***")
-
+        layer_n_list = [config.num_hidden_layers] + small_layer_n_list
+        logger.info("Setting inference model to %d Layers" % layer_n_list[model_args.model_infer_idx])
+        model.bert.multiple_encoder.set_infer_model_idx(model_args.model_infer_idx)
         # Loop to handle MNLI double evaluation (matched, mis-matched)
         eval_datasets = [eval_dataset]
-        #if data_args.task_name == "mnli":
-        #    mnli_mm_data_args = dataclasses.replace(data_args, task_name="mnli-mm")
-        #    eval_datasets.append(
-        #        GlueDataset(mnli_mm_data_args, tokenizer=tokenizer, mode="dev", cache_dir=model_args.cache_dir)
-        #    )
+        # if data_args.task_name == "mnli":
+        #     mnli_mm_data_args = dataclasses.replace(data_args, task_name="mnli-mm")
+        #     eval_datasets.append(
+        #         GlueDataset(mnli_mm_data_args, tokenizer=tokenizer, mode="dev", cache_dir=model_args.cache_dir)
+        #     )
 
         for eval_dataset in eval_datasets:
             trainer.compute_metrics = build_compute_metrics_fn(eval_dataset.args.task_name)
-            eval_result = trainer.evaluate(eval_dataset=eval_dataset)
-
+            eval_result = trainer.evaluate(eval_dataset=eval_dataset, require_exit_dist=model_args.require_exit_dist)
             output_eval_file = os.path.join(
                 training_args.output_dir, f"eval_results_{eval_dataset.args.task_name}.txt"
             )
@@ -256,17 +244,16 @@ def main():
                     for key, value in eval_result.items():
                         logger.info("  %s = %s", key, value)
                         writer.write("%s = %s\n" % (key, value))
-
             eval_results.update(eval_result)
 
     if training_args.do_predict:
         logging.info("*** Test ***")
         test_datasets = [test_dataset]
-        if data_args.task_name == "mnli":
-            mnli_mm_data_args = dataclasses.replace(data_args, task_name="mnli-mm")
-            test_datasets.append(
-                GlueDataset(mnli_mm_data_args, tokenizer=tokenizer, mode="test", cache_dir=model_args.cache_dir)
-            )
+        # if data_args.task_name == "mnli":
+        #     mnli_mm_data_args = dataclasses.replace(data_args, task_name="mnli-mm")
+        #     test_datasets.append(
+        #         GlueDataset(mnli_mm_data_args, tokenizer=tokenizer, mode="test", cache_dir=model_args.cache_dir)
+        #     )
 
         for test_dataset in test_datasets:
             predictions = trainer.predict(test_dataset=test_dataset).predictions

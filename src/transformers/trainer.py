@@ -8,6 +8,7 @@ import shutil
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
+from collections import defaultdict
 import time
 
 import numpy as np
@@ -399,7 +400,6 @@ class Trainer:
             num_train_epochs = self.args.num_train_epochs
 
         optimizer, scheduler = self.get_optimizers(num_training_steps=t_total)
-
         # Check if saved optimizer or scheduler states exist
         if (
                 model_path is not None
@@ -734,7 +734,8 @@ class Trainer:
             prediction_loss_only: Optional[bool] = None,
             head_mask=None,
             require_head_masks=False,
-            require_paths=False
+            require_paths=False,
+            require_exit_dist=False
     ):
         """
         Run evaluation and return metrics.
@@ -753,7 +754,8 @@ class Trainer:
         eval_dataloader = self.get_eval_dataloader(eval_dataset)
         output = self._prediction_loop(eval_dataloader, description="Evaluation",
                                        head_mask=head_mask,
-                                       require_paths=require_paths)
+                                       require_paths=require_paths,
+                                       require_exit_dist=require_exit_dist)
 
         self._log(output.metrics)
 
@@ -778,7 +780,7 @@ class Trainer:
 
     def _prediction_loop(
             self, dataloader: DataLoader, description: str, prediction_loss_only: Optional[bool] = None, head_mask=None,
-            require_head_masks=False, require_paths=False, num_parts=6
+            require_head_masks=False, require_paths=False, num_parts=6, require_exit_dist=False, model_layer_num=[2, 6, 12]
     ):
         """
         Prediction/evaluation loop, shared by `evaluate()` and `predict()`.
@@ -805,8 +807,11 @@ class Trainer:
         eval_classification_reward: List[float] = []
         eval_path_reward: List[float] = []
         eval_path_prob: List = []
+        eval_path_dist = defaultdict(lambda: 0)
         preds: torch.Tensor = None
         label_ids: torch.Tensor = None
+        task_label_ids: torch.Tensor = None
+        task_preds = None
         learned_head_masks: torch.Tensor = None
         paths: list = []
         model.eval()
@@ -839,14 +844,14 @@ class Trainer:
                     eval_classification_reward += [performance_reward.mean().item()]
                     eval_path_reward += [path_reward.mean().item()]
                     eval_path_prob += [path_prob.mean().item()]
-                # if require_head_masks:
-                #     head_masks = outputs[-1] # the last one， tuple: (Tensor(bsz,  num_attention_heads, seq_len, 1), )
-                #     head_masks = torch.stack(head_masks).squeeze() # (12, bsz, num_heads, seq_len, 1)
-                #     head_masks = head_masks.transpose(1, 0) # bsz, num_layer, num_heads, seq_len
-                #     if learned_head_masks is None:
-                #         learned_head_masks = head_masks.detach()
-                #     else:
-                #         learned_head_masks = torch.cat((learned_head_masks, head_masks.detach()), dim=0)
+
+                if require_exit_dist:
+                    dist = outputs[-1] # tensor
+                    dist = dist.reshape(len(model_layer_num), -1)
+                    dist = np.sum(dist.detach().cpu().numpy(), axis=-1)
+                    for idx, num in enumerate(dist):
+                        eval_path_dist[idx] += num
+
 
             if not prediction_loss_only:
                 if preds is None:
@@ -858,6 +863,17 @@ class Trainer:
                         label_ids = inputs["labels"].detach()
                     else:
                         label_ids = torch.cat((label_ids, inputs["labels"].detach()), dim=0)
+
+                if inputs.get("task_labels") is not None:
+                    if task_label_ids is None:
+                        task_label_ids = inputs["task_labels"].detach()
+                    else:
+                        task_label_ids = torch.cat((task_label_ids, inputs["task_labels"].detach()), dim=0)
+                    if task_preds is None:
+                        task_preds = outputs[1].detach()
+                    else:
+                        task_preds = torch.cat((task_preds, outputs[1].detach()), dim=0)
+
         end = time.time()
 
         if self.args.local_rank != -1:
@@ -897,12 +913,29 @@ class Trainer:
 
         if self.compute_metrics is not None and preds is not None and label_ids is not None:
             metrics = self.compute_metrics(EvalPrediction(predictions=preds, label_ids=label_ids))
+            if task_preds is not None:
+                task_metrics = self.compute_metrics(EvalPrediction(predictions=task_preds,
+                                                                   label_ids=task_label_ids))
+                logger.info("task metrics: ")
+                self._log(task_metrics)
         else:
             metrics = {}
         if len(eval_losses) > 0:
             metrics["eval_loss"] = np.mean(eval_losses)
         metrics["eval_time"] = end - start
         metrics["expected_saving"] = expected_saving
+        if len(eval_path_dist.keys()) > 0:
+            layer_cnt = 0
+            layer_sum = 0
+            example_num = 0
+            for idx, l_num in enumerate(model_layer_num) :
+                print("%d  examples exit at %d layer" % (eval_path_dist[idx], l_num ) ) 
+                layer_sum += l_num
+                layer_cnt += layer_sum * eval_path_dist[idx] # .cpu().numpy()
+                example_num += eval_path_dist[idx] # .cpu().numpy()
+            print(eval_path_dist) 
+            metrics["eval_new_saving"] = (1 - layer_cnt / ( example_num * model_layer_num[-1]))
+        
         if len(eval_classification_reward) > 0:
             metrics["eval_classification_reward"] = np.mean(eval_classification_reward)
         if len(eval_path_reward) > 0:
