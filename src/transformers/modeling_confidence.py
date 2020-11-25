@@ -54,7 +54,7 @@ class BertConfidenceAwareClassification(BertPreTrainedModel):
             if difficulty_labels is not None:
                 conf = F.softmax(task_logits, dim=-1)  # bsz, num_label
                 confidence, _ = conf.max(dim=-1)
-                loss += self.adjust_loss(difficulty_labels, confidence)
+                loss += self.adjust_distribution(difficulty_labels, confidence)
 
                 # difficulty_idx = (difficulty_labels != 0)  # index for dif examples
                 # if len(difficulty_idx) == 0 or len(difficulty_idx) == len(difficulty_labels):
@@ -137,17 +137,16 @@ class BertConfidenceAwareClassification(BertPreTrainedModel):
         # we first try to adjust difficulty = 0  and difficulty = 1
         easy_idx = (difficulty_labels == 0)
         hard_idx = (difficulty_labels == 1)
-        if len(easy_idx) == 0 or len(hard_idx) == 0:
+        easy_conf = confidence[easy_idx]
+        hard_conf = confidence[hard_idx]
+        if len(easy_conf) == 0 or len(hard_conf) == 0:
             return 0.0
-        hard_conf = confidence[easy_idx]
-        easy_conf = confidence[hard_idx]
-
         uniform = torch.ones_like(hard_conf) / len(hard_conf)
         sampled_hard_idx = torch.multinomial(uniform, num_samples=len(easy_conf), replacement=True)
         rank_input1 = easy_conf
         rank_input2 = hard_conf[sampled_hard_idx]
-        diff_label1 = 1 / (1 + difficulty_labels[easy_idx])  # 1.0
-        diff_label2 = 1 / (1 + difficulty_labels[hard_idx][sampled_hard_idx])  # 0.5
+        diff_label1 = 1.0 / (1.0 + difficulty_labels[easy_idx])  # 1.0
+        diff_label2 = 1.0 / (1.0 + difficulty_labels[hard_idx][sampled_hard_idx])  # 0.5
         target, _ = self._get_target_margin(diff_label1, diff_label2)
         ranking_loss = self.adjust_loss(rank_input1, rank_input2, target)
         return ranking_loss
