@@ -15,7 +15,6 @@
 # limitations under the License.
 """ Finetuning the library models for sequence classification on GLUE (Bert, XLM, XLNet, RoBERTa, Albert, XLM-RoBERTa)."""
 
-
 import dataclasses
 import logging
 import os
@@ -38,7 +37,6 @@ from transformers import (
     glue_tasks_num_labels,
     set_seed,
 )
-
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +62,13 @@ class ModelArguments:
     predict_file: Optional[str] = field(
         default='train', metadata={"help": "Dataset to predict"}
     )
+    half_index: Optional[int] = field(
+        default=-1, metadata={"help": "whether use half dataset to train the model"}
+    )
+    only_ce: Optional[bool] = field(
+        default=False, metadata={"help": "whether add confidence loss to training"}
+    )
+
 
 def main():
     # See all possible arguments in src/transformers/training_args.py
@@ -80,10 +85,10 @@ def main():
         model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 
     if (
-        os.path.exists(training_args.output_dir)
-        and os.listdir(training_args.output_dir)
-        and training_args.do_train
-        and not training_args.overwrite_output_dir
+            os.path.exists(training_args.output_dir)
+            and os.listdir(training_args.output_dir)
+            and training_args.do_train
+            and not training_args.overwrite_output_dir
     ):
         raise ValueError(
             f"Output directory ({training_args.output_dir}) already exists and is not empty. Use --overwrite_output_dir to overcome."
@@ -136,26 +141,33 @@ def main():
         config=config,
         cache_dir=model_args.cache_dir,
     )
+    # set only ce for normal training
+    model.set_only_ce(model_args.only_ce)
 
     # Get datasets
     train_dataset = (
-        GlueDataset(data_args, tokenizer=tokenizer, evaluate=False) #cache_dir=model_args.cache_dir)
+        GlueDataset(data_args, tokenizer=tokenizer, evaluate=False)  # cache_dir=model_args.cache_dir)
         # if training_args.do_train else None
     )
+    if model_args.half_index != -1:
+        assert model_args.half_index in [0, 1]  # we only support 1/2
+        train_dataset.set_mode("half")
+        train_dataset.set_index(model_args.half_index)
+
     eval_dataset = (
-        GlueDataset(data_args, tokenizer=tokenizer, evaluate=True) # mode="dev", cache_dir=model_args.cache_dir)
+        GlueDataset(data_args, tokenizer=tokenizer, evaluate=True)  # mode="dev", cache_dir=model_args.cache_dir)
         if training_args.do_eval
         else None
     )
     test_dataset = (
-        GlueDataset(data_args, tokenizer=tokenizer, evaluate=True) # mode="test", cache_dir=model_args.cache_dir)
+        GlueDataset(data_args, tokenizer=tokenizer, evaluate=True)  # mode="test", cache_dir=model_args.cache_dir)
         if training_args.do_predict
         else None
     )
 
     def build_compute_metrics_fn(task_name: str) -> Callable[[EvalPrediction], Dict]:
         def compute_metrics_fn(p: EvalPrediction):
-            if output_mode == "classification" or output_mode == 'multitask' or output_mode =='difaware':
+            if output_mode == "classification" or output_mode == 'multitask' or output_mode == 'difaware':
                 preds = np.argmax(p.predictions, axis=1)
             elif output_mode == "regression":
                 preds = np.squeeze(p.predictions)
@@ -232,12 +244,13 @@ def main():
             predictions = prediction_output.predictions
             prediction_prob = softmax(predictions, axis=-1)
             labels = prediction_output.label_ids
-            output_prob_file = os.path.join(training_args.output_dir, f"%s_results_{task}_prob.npy" % model_args.predict_file )
-            output_label_file = os.path.join(training_args.output_dir, f"%s_results_{task}_label.npy" % model_args.predict_file)
+            output_prob_file = os.path.join(training_args.output_dir,
+                                            f"%s_results_{task}_prob.npy" % model_args.predict_file)
+            output_label_file = os.path.join(training_args.output_dir,
+                                             f"%s_results_{task}_label.npy" % model_args.predict_file)
             if trainer.is_world_master():
                 np.save(output_prob_file, prediction_prob)
                 np.save(output_label_file, labels)
-
 
         logging.info("*** Test ***")
         test_datasets = [test_dataset]
