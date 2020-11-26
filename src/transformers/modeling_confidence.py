@@ -54,7 +54,8 @@ class BertConfidenceAwareClassification(BertPreTrainedModel):
             if difficulty_labels is not None:
                 conf = F.softmax(task_logits, dim=-1)  # bsz, num_label
                 confidence, _ = conf.max(dim=-1)
-                loss += self.confidence_loss(difficulty_labels, confidence)
+                loss += self.confidence_loss(difficulty_labels, confidence)  # pair loss between 0 and other examples
+                loss += self.pair_loss(difficulty_labels, confidence, dif1=1, dif2=2)
                 outputs = (loss,) + outputs
 
         return outputs  # (loss), logits, (hidden_states), (attentions)
@@ -66,10 +67,10 @@ class BertConfidenceAwareClassification(BertPreTrainedModel):
         target = geq + less
         return target, margin
 
-    def adjust_distribution(self, difficulty_labels, confidence):
+    def pair_loss(self, difficulty_labels, confidence, dif1=0, dif2=1):
         # we first try to adjust difficulty = 0  and difficulty = 1
-        easy_idx = (difficulty_labels == 0)
-        hard_idx = (difficulty_labels == 1)
+        easy_idx = (difficulty_labels == dif1)
+        hard_idx = (difficulty_labels == dif2)
         easy_conf = confidence[easy_idx]
         hard_conf = confidence[hard_idx]
         if len(easy_conf) == 0 or len(hard_conf) == 0:
