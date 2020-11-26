@@ -13,8 +13,11 @@ class BertConfidenceAwareClassification(BertPreTrainedModel):
         self.init_weights()
         self.ranking_loss = nn.MarginRankingLoss(margin=0.0)
         self.margin_loss = nn.MarginRankingLoss(margin=0.2)
+        self.only_ce = False
 
-    @add_start_docstrings_to_callable(BERT_INPUTS_DOCSTRING.format("(batch_size, sequence_length)"))
+    def set_only_ce(self, only_ce):
+        self.only_ce = only_ce
+
     def forward(
             self,
             input_ids=None,
@@ -50,12 +53,12 @@ class BertConfidenceAwareClassification(BertPreTrainedModel):
             else:
                 loss_fct = CrossEntropyLoss()
                 loss = loss_fct(task_logits.view(-1, self.num_labels), labels.view(-1))
-            # ---------------------------------- #
-            # if difficulty_labels is not None:
-                #conf = F.softmax(task_logits, dim=-1)  # bsz, num_label
-                #confidence, _ = conf.max(dim=-1)
-                #loss += self.confidence_loss(difficulty_labels, confidence)
-                #loss += self.pair_loss(difficulty_labels, confidence, dif1=1, dif2=2)
+
+            if not self.only_ce and difficulty_labels is not None:
+                conf = F.softmax(task_logits, dim=-1)  # bsz, num_label
+                confidence, _ = conf.max(dim=-1)
+                loss += self.confidence_loss(difficulty_labels, confidence)  # pair loss between 0 and other examples
+                loss += self.pair_loss(difficulty_labels, confidence, dif1=1, dif2=2)
             outputs = (loss,) + outputs
 
         return outputs  # (loss), logits, (hidden_states), (attentions)
