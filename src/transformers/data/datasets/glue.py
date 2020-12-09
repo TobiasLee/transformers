@@ -128,6 +128,10 @@ class GlueDataset(Dataset):
                 )
         self.mode = 'all'
         self.current_idx = 0
+        self.split_features = None
+        self.left_features = None
+        self.state = "train"
+
 
     def __len__(self):
         if self.mode == "all":
@@ -137,6 +141,24 @@ class GlueDataset(Dataset):
                 return len(self.features_for_head_pruning)
             elif self.current_idx == 1:
                 return len(self.features_for_dev)
+        elif self.mode == "split":
+            if self.split_features is None or self.left_features is None :
+                split_size = len(self.features) / self.split_k
+                self.split_features = self.features[:split_size * self.current_idx] + \
+                                      self.features[split_size * (self.current_idx + 1):]
+                self.left_features = self.features[split_size * self.current_idx:
+                                                   split_size * (self.current_idx + 1)]
+
+            if self.state == "train":
+                return len(self.split_features)
+            elif self.state == "eval":
+                return len(self.left_features)
+            else:
+                raise ValueError("Unsupported state:%s" % self.state )
+        else:
+            raise  ValueError("Unsupported mode %s" % self.mode)
+
+
 
     def __getitem__(self, i):
         if self.mode == "all":
@@ -146,13 +168,33 @@ class GlueDataset(Dataset):
                 return self.features_for_head_pruning[i]
             elif self.current_idx == 1:
                 return self.features_for_dev[i]
+        elif self.mode == 'split': # we split
+            if self.split_features is None:
+                split_size = len(self.features) / self.split_k
+                self.split_features = self.features[:split_size * self.current_idx] + \
+                                      self.features[split_size * (self.current_idx +1) : ]
+                self.left_features = self.features[split_size * self.current_idx:
+                                                   split_size * (self.current_idx + 1 )]
+            if self.state == "train":
+                return self.split_features[i]
+            elif self.state == "eval":
+                return self.left_features[i]
+
+            return self.split_features[i]
+
+        else:
+            raise ValueError("Unsupported mode %s" % self.mode)
+
 
     def set_mode(self, mode='all'):
-        assert mode in ['all', 'half'], "Only support half or all mode"
+        assert mode in ['all', 'half', "split"], "Only support all, half, split mode"
         self.mode = mode
 
     def set_index(self, index):
         self.current_idx = index
-    
+
+    def set_state(self, state):
+        self.state = state
+
     def get_labels(self):
         return self.label_list
