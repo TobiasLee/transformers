@@ -53,6 +53,7 @@ class ModelArguments:
     only_ce: bool = field(
         default=False, metadata={"help": "whether add confidence loss to training"}
     )
+    split_data: bool = field(default=False)
     config_name: Optional[str] = field(
         default=None, metadata={"help": "Pretrained config name or path if not the same as model_name"}
     )
@@ -66,10 +67,8 @@ class ModelArguments:
         default='train', metadata={"help": "Dataset to predict"}
     )
 
-    half_index: Optional[int] = field(
-        default=-1, metadata={"help": "whether use half dataset to train the model"}
-    )
-
+    split_num: Optional[int] = field(default=-1, metadata={"help": "Split dataset into how many parts"})
+    current_index: Optional[int] = field(default=-1, metadata={"help": "use which part to evaluation"})
 
 
 
@@ -152,10 +151,12 @@ def main():
         GlueDataset(data_args, tokenizer=tokenizer, evaluate=False)  # cache_dir=model_args.cache_dir)
         # if training_args.do_train else None
     )
-    if model_args.half_index != -1:
-        assert model_args.half_index in [0, 1]  # we only support 1/2
-        train_dataset.set_mode("half")
-        train_dataset.set_index(model_args.half_index)
+
+    if model_args.split_data: # split mode
+        train_dataset.set_mode("split")
+        train_dataset.split_k = model_args.split_num
+        assert 0 <= model_args.current_index  <  model_args.split_num
+        train_dataset.set_index(model_args.current_index) # use which to eval 
 
     eval_dataset = (
         GlueDataset(data_args, tokenizer=tokenizer, evaluate=True)  # mode="dev", cache_dir=model_args.cache_dir)
@@ -232,9 +233,9 @@ def main():
         logger.info("Predict prob and label dict")
         if model_args.predict_file == "train":
             eval_datasets = [train_dataset]
-            if model_args.half_index !=  -1:
-                logger.info("Setting to another half data")
-                train_dataset.set_index(1 - model_args.half_index)
+            if model_args.split_data:
+                logger.info("Setting to left features for predicting ")
+                train_dataset.set_state('eval')
         elif model_args.predict_file == "eval":
             eval_datasets = [eval_dataset]
         elif model_args.predict_file == "test":
@@ -272,7 +273,7 @@ def main():
                 predictions = np.argmax(predictions, axis=1)
 
             output_test_file = os.path.join(
-                training_args.output_dir, f"test_results_{test_dataset.args.task_name}.txt"
+                training_args.output_dir, f"test_results_{test_dataset.args.task_name}_{model_args.current_index}.txt"
             )
             if trainer.is_world_master():
                 with open(output_test_file, "w") as writer:

@@ -131,7 +131,7 @@ class GlueDataset(Dataset):
         self.split_features = None
         self.left_features = None
         self.state = "train"
-
+        self.split_k = 1 
 
     def __len__(self):
         if self.mode == "all":
@@ -143,7 +143,7 @@ class GlueDataset(Dataset):
                 return len(self.features_for_dev)
         elif self.mode == "split":
             if self.split_features is None or self.left_features is None :
-                split_size = len(self.features) / self.split_k
+                split_size = len(self.features) // self.split_k
                 self.split_features = self.features[:split_size * self.current_idx] + \
                                       self.features[split_size * (self.current_idx + 1):]
                 self.left_features = self.features[split_size * self.current_idx:
@@ -170,7 +170,7 @@ class GlueDataset(Dataset):
                 return self.features_for_dev[i]
         elif self.mode == 'split': # we split
             if self.split_features is None:
-                split_size = len(self.features) / self.split_k
+                split_size = len(self.features) // self.split_k
                 self.split_features = self.features[:split_size * self.current_idx] + \
                                       self.features[split_size * (self.current_idx +1) : ]
                 self.left_features = self.features[split_size * self.current_idx:
