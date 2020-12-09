@@ -50,6 +50,9 @@ class ModelArguments:
     model_name_or_path: str = field(
         metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models"}
     )
+    only_ce: bool = field(
+        default=False, metadata={"help": "whether add confidence loss to training"}
+    )
     config_name: Optional[str] = field(
         default=None, metadata={"help": "Pretrained config name or path if not the same as model_name"}
     )
@@ -62,12 +65,12 @@ class ModelArguments:
     predict_file: Optional[str] = field(
         default='train', metadata={"help": "Dataset to predict"}
     )
+
     half_index: Optional[int] = field(
         default=-1, metadata={"help": "whether use half dataset to train the model"}
     )
-    only_ce: Optional[bool] = field(
-        default=False, metadata={"help": "whether add confidence loss to training"}
-    )
+
+
 
 
 def main():
@@ -229,6 +232,9 @@ def main():
         logger.info("Predict prob and label dict")
         if model_args.predict_file == "train":
             eval_datasets = [train_dataset]
+            if model_args.half_index !=  -1:
+                logger.info("Setting to another half data")
+                train_dataset.set_index(1 - model_args.half_index)
         elif model_args.predict_file == "eval":
             eval_datasets = [eval_dataset]
         elif model_args.predict_file == "test":
